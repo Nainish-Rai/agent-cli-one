@@ -59,7 +59,7 @@ class DatabaseAgent {
     this.genAI = apiKey ? new GoogleGenerativeAI(apiKey) : null;
     this.model =
       apiKey && this.genAI
-        ? this.genAI.getGenerativeModel({ model: "gemini-1.5-flash" })
+        ? this.genAI.getGenerativeModel({ model: "gemini-2.5-flash" })
         : null;
   }
 
