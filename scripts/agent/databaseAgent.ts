@@ -509,13 +509,251 @@ export class DatabaseAgent {
   private generateApiRouteContent(schemaDef: SchemaDefinition): string {
     const tableName = schemaDef.tableName;
     const className = toPascalCase(tableName);
-    return `import { NextRequest, NextResponse } from "next/server";\nimport { drizzle } from "drizzle-orm/node-postgres";\nimport { Pool } from "pg";\nimport { ${tableName} } from "@/db/schema";\nimport { desc, eq } from "drizzle-orm";\n\nconst pool = new Pool({ connectionString: process.env.DATABASE_URL || "postgresql://localhost:5432/spotify_clone" });\nconst db = drizzle(pool);\nexport async function GET(request: NextRequest){ try { const { searchParams } = new URL(request.url); const limit = parseInt(searchParams.get('limit')||'10'); const offset = parseInt(searchParams.get('offset')||'0'); const userId = searchParams.get('user_id'); let query = db.select().from(${tableName});${
-      schemaDef.fields.some((f) => f.name === "user_id")
-        ? " if(userId){ query = query.where(eq(" +
-          tableName +
-          ".user_id, userId)); }"
+    const hasUserId = schemaDef.fields.some((f) => f.name === "user_id");
+
+    return `import { NextRequest, NextResponse } from "next/server";
+import { drizzle } from "drizzle-orm/node-postgres";
+import { Pool } from "pg";
+import { ${tableName}, type ${className}, type New${className} } from "@/db/schema";
+import { desc, eq, and, count } from "drizzle-orm";
+
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL || "postgresql://localhost:5432/spotify_clone"
+});
+const db = drizzle(pool);
+
+// GET - Fetch ${tableName} records
+export async function GET(request: NextRequest) {
+  try {
+    const { searchParams } = new URL(request.url);
+    const limit = Math.min(parseInt(searchParams.get('limit') || '10'), 100); // Max 100
+    const offset = Math.max(parseInt(searchParams.get('offset') || '0'), 0);
+    const userId = searchParams.get('user_id');
+    const id = searchParams.get('id');
+
+    // If fetching a specific record by ID
+    if (id) {
+      const record = await db
+        .select()
+        .from(${tableName})
+        .where(eq(${tableName}.id, parseInt(id)))
+        .limit(1);
+
+      if (record.length === 0) {
+        return NextResponse.json(
+          { success: false, error: '${className} not found' },
+          { status: 404 }
+        );
+      }
+
+      return NextResponse.json({
+        success: true,
+        data: record[0]
+      });
+    }
+
+    // Build query with optional filters
+    let query = db.select().from(${tableName});
+    let countQuery = db.select({ count: count() }).from(${tableName});
+
+    const whereConditions = [];
+    ${
+      hasUserId
+        ? `
+    if (userId) {
+      whereConditions.push(eq(${tableName}.user_id, userId));
+    }`
         : ""
-    } const records = await query.orderBy(desc(${tableName}.created_at)).limit(limit).offset(offset); return NextResponse.json({ success:true, data: records, pagination:{ limit, offset, count: records.length }});} catch(e){ return NextResponse.json({ success:false, error:'Failed to fetch ${tableName}'},{ status:500}); } }\nexport async function POST(request: NextRequest){ try { const body = await request.json(); const newRecord = await db.insert(${tableName}).values(body).returning(); return NextResponse.json({ success:true, data:newRecord[0]}, { status:201}); } catch(e){ return NextResponse.json({ success:false, error:'Failed to create ${tableName}'},{ status:500}); } }\nexport async function DELETE(request: NextRequest){ try { const { searchParams } = new URL(request.url); const id = searchParams.get('id'); if(!id) return NextResponse.json({ success:false, error:'ID is required'},{ status:400}); await db.delete(${tableName}).where(eq(${tableName}.id, parseInt(id))); return NextResponse.json({ success:true, message:'${className} deleted successfully'});} catch(e){ return NextResponse.json({ success:false, error:'Failed to delete ${tableName}'},{ status:500}); } }`;
+    }
+
+    if (whereConditions.length > 0) {
+      const whereClause = whereConditions.length === 1
+        ? whereConditions[0]
+        : and(...whereConditions);
+      query = query.where(whereClause);
+      countQuery = countQuery.where(whereClause);
+    }
+
+    // Get total count for pagination
+    const [totalResult] = await countQuery;
+    const total = totalResult.count;
+
+    // Execute main query with pagination
+    const records = await query
+      .orderBy(desc(${tableName}.created_at))
+      .limit(limit)
+      .offset(offset);
+
+    return NextResponse.json({
+      success: true,
+      data: records,
+      pagination: {
+        limit,
+        offset,
+        total,
+        hasMore: offset + limit < total
+      }
+    });
+
+  } catch (error) {
+    console.error('Error fetching ${tableName}:', error);
+    return NextResponse.json(
+      { success: false, error: 'Failed to fetch ${tableName}' },
+      { status: 500 }
+    );
+  }
+}
+
+// POST - Create new ${tableName} record
+export async function POST(request: NextRequest) {
+  try {
+    const body = await request.json();
+
+    // Basic validation
+    if (!body || typeof body !== 'object') {
+      return NextResponse.json(
+        { success: false, error: 'Invalid request body' },
+        { status: 400 }
+      );
+    }
+
+    // Remove id and timestamps if present (they should be auto-generated)
+    const { id, created_at, updated_at, ...createData } = body;
+
+    // Validate required fields
+    const requiredFields = [${schemaDef.fields
+      .filter(
+        (f) =>
+          f.name !== "id" &&
+          f.name !== "created_at" &&
+          f.name !== "updated_at" &&
+          f.constraints?.includes("notNull()")
+      )
+      .map((f) => `'${f.name}'`)
+      .join(", ")}];
+
+    for (const field of requiredFields) {
+      if (!createData[field]) {
+        return NextResponse.json(
+          { success: false, error: \`Missing required field: \${field}\` },
+          { status: 400 }
+        );
+      }
+    }
+
+    const newRecord = await db
+      .insert(${tableName})
+      .values(createData as New${className})
+      .returning();
+
+    return NextResponse.json(
+      { success: true, data: newRecord[0] },
+      { status: 201 }
+    );
+
+  } catch (error) {
+    console.error('Error creating ${tableName}:', error);
+    return NextResponse.json(
+      { success: false, error: 'Failed to create ${tableName}' },
+      { status: 500 }
+    );
+  }
+}
+
+// PUT - Update ${tableName} record
+export async function PUT(request: NextRequest) {
+  try {
+    const { searchParams } = new URL(request.url);
+    const id = searchParams.get('id');
+
+    if (!id) {
+      return NextResponse.json(
+        { success: false, error: 'ID is required' },
+        { status: 400 }
+      );
+    }
+
+    const body = await request.json();
+    if (!body || typeof body !== 'object') {
+      return NextResponse.json(
+        { success: false, error: 'Invalid request body' },
+        { status: 400 }
+      );
+    }
+
+    // Remove fields that shouldn't be updated
+    const { id: bodyId, created_at, ...updateData } = body;
+
+    // Add updated_at timestamp
+    updateData.updated_at = new Date();
+
+    const updatedRecord = await db
+      .update(${tableName})
+      .set(updateData)
+      .where(eq(${tableName}.id, parseInt(id)))
+      .returning();
+
+    if (updatedRecord.length === 0) {
+      return NextResponse.json(
+        { success: false, error: '${className} not found' },
+        { status: 404 }
+      );
+    }
+
+    return NextResponse.json({
+      success: true,
+      data: updatedRecord[0]
+    });
+
+  } catch (error) {
+    console.error('Error updating ${tableName}:', error);
+    return NextResponse.json(
+      { success: false, error: 'Failed to update ${tableName}' },
+      { status: 500 }
+    );
+  }
+}
+
+// DELETE - Remove ${tableName} record
+export async function DELETE(request: NextRequest) {
+  try {
+    const { searchParams } = new URL(request.url);
+    const id = searchParams.get('id');
+
+    if (!id) {
+      return NextResponse.json(
+        { success: false, error: 'ID is required' },
+        { status: 400 }
+      );
+    }
+
+    const deletedRecord = await db
+      .delete(${tableName})
+      .where(eq(${tableName}.id, parseInt(id)))
+      .returning();
+
+    if (deletedRecord.length === 0) {
+      return NextResponse.json(
+        { success: false, error: '${className} not found' },
+        { status: 404 }
+      );
+    }
+
+    return NextResponse.json({
+      success: true,
+      message: '${className} deleted successfully',
+      data: deletedRecord[0]
+    });
+
+  } catch (error) {
+    console.error('Error deleting ${tableName}:', error);
+    return NextResponse.json(
+      { success: false, error: 'Failed to delete ${tableName}' },
+      { status: 500 }
+    );
+  }
+}
+`;
   }
 
   // ---------------- Seeding ----------------
@@ -547,10 +785,191 @@ export class DatabaseAgent {
 
   private generateSeedContent(schemaDef: SchemaDefinition): string {
     const tableName = schemaDef.tableName;
-    return `import { drizzle } from "drizzle-orm/node-postgres";\nimport { Pool } from "pg";\nimport dotenv from "dotenv";\nimport { ${tableName} } from "../src/db/schema/${schemaDef.fileName.replace(
+    const className = toPascalCase(tableName);
+
+    // Generate sample data based on schema fields
+    const sampleDataGenerator = this.generateSampleDataForSchema(schemaDef);
+
+    return `import { drizzle } from "drizzle-orm/node-postgres";
+import { Pool } from "pg";
+import dotenv from "dotenv";
+import { ${tableName}, type New${className} } from "../src/db/schema/${schemaDef.fileName.replace(
       ".ts",
       ""
-    )}";\ndotenv.config();\nasync function seed(){ const pool = new Pool({ connectionString: process.env.DATABASE_URL || 'postgresql://localhost:5432/spotify_clone'}); const db = drizzle(pool); const sampleData = []; try { await db.insert(${tableName}).values(sampleData); console.log('✅ ${tableName} seeded'); } catch(e){ console.error('❌ Error seeding ${tableName}', e);} finally { await pool.end(); } }\nseed().catch(console.error);`;
+    )}";
+
+dotenv.config();
+
+async function seed() {
+  const pool = new Pool({
+    connectionString: process.env.DATABASE_URL || 'postgresql://localhost:5432/spotify_clone'
+  });
+  const db = drizzle(pool);
+
+  // Sample data for ${tableName}
+  const sampleData: New${className}[] = ${sampleDataGenerator};
+
+  try {
+    console.log('🌱 Seeding ${tableName} with sample data...');
+
+    // Clear existing data (optional - comment out if you want to keep existing data)
+    // await db.delete(${tableName});
+
+    const insertedRecords = await db.insert(${tableName}).values(sampleData).returning();
+
+    console.log(\`✅ Successfully seeded \${insertedRecords.length} records to ${tableName}\`);
+    console.log('Sample records:', insertedRecords.slice(0, 3)); // Show first 3 records
+
+  } catch (error) {
+    console.error('❌ Error seeding ${tableName}:', error);
+    process.exit(1);
+  } finally {
+    await pool.end();
+  }
+}
+
+seed().catch(console.error);
+`;
+  }
+
+  private generateSampleDataForSchema(schemaDef: SchemaDefinition): string {
+    const { tableName, fields } = schemaDef;
+    const sampleCount = 5; // Generate 5 sample records
+    const samples: any[] = [];
+
+    for (let i = 0; i < sampleCount; i++) {
+      const record: any = {};
+
+      fields.forEach((field) => {
+        // Skip auto-generated fields
+        if (["id", "created_at", "updated_at"].includes(field.name)) {
+          return;
+        }
+
+        // Generate sample data based on field name and type
+        switch (field.type) {
+          case "text":
+            record[field.name] = this.generateSampleText(field.name, i);
+            break;
+          case "integer":
+            record[field.name] = this.generateSampleInteger(field.name, i);
+            break;
+          case "boolean":
+            record[field.name] = Math.random() > 0.5;
+            break;
+          case "uuid":
+            record[field.name] = `${Math.random()
+              .toString(36)
+              .substr(2, 8)}-${Math.random()
+              .toString(36)
+              .substr(2, 4)}-${Math.random()
+              .toString(36)
+              .substr(2, 4)}-${Math.random()
+              .toString(36)
+              .substr(2, 4)}-${Math.random().toString(36).substr(2, 12)}`;
+            break;
+          case "timestamp":
+            if (
+              field.name.includes("played_at") ||
+              field.name.includes("timestamp")
+            ) {
+              record[field.name] = new Date(
+                Date.now() - Math.random() * 7 * 24 * 60 * 60 * 1000
+              ); // Random time in last week
+            }
+            break;
+        }
+      });
+
+      samples.push(record);
+    }
+
+    return JSON.stringify(samples, null, 2);
+  }
+
+  private generateSampleText(fieldName: string, index: number): string {
+    const samples = {
+      user_id: [
+        `user_${index + 1}`,
+        `spotify_user_${index + 1}`,
+        `test_user_${index + 1}`,
+      ],
+      song_id: [
+        `song_${index + 1}`,
+        `track_${Math.random().toString(36).substr(2, 8)}`,
+      ],
+      song_title: [
+        "Bohemian Rhapsody",
+        "Hotel California",
+        "Stairway to Heaven",
+        "Imagine",
+        "Sweet Child O Mine",
+        "Billie Jean",
+        "Like a Rolling Stone",
+        "Purple Haze",
+        "What's Going On",
+        "Respect",
+      ],
+      artist: [
+        "Queen",
+        "Eagles",
+        "Led Zeppelin",
+        "John Lennon",
+        "Guns N' Roses",
+        "Michael Jackson",
+        "Bob Dylan",
+        "Jimi Hendrix",
+        "Marvin Gaye",
+        "Aretha Franklin",
+      ],
+      album: [
+        "A Night at the Opera",
+        "Hotel California",
+        "Led Zeppelin IV",
+        "Imagine",
+        "Appetite for Destruction",
+        "Thriller",
+        "Highway 61 Revisited",
+        "Are You Experienced",
+        "What's Going On",
+        "I Never Loved a Man",
+      ],
+      name: [`Sample Name ${index + 1}`, `Test Item ${index + 1}`],
+      title: [`Sample Title ${index + 1}`, `Test Title ${index + 1}`],
+      description: [
+        `Sample description for item ${index + 1}`,
+        `Test description ${index + 1}`,
+      ],
+      email: [`user${index + 1}@example.com`, `test${index + 1}@domain.com`],
+      status: ["active", "inactive", "pending", "completed"],
+      category: ["music", "entertainment", "lifestyle", "technology"],
+    };
+
+    if (samples[fieldName as keyof typeof samples]) {
+      const options = samples[fieldName as keyof typeof samples];
+      return options[index % options.length];
+    }
+
+    // Default fallback
+    return `sample_${fieldName}_${index + 1}`;
+  }
+
+  private generateSampleInteger(fieldName: string, index: number): number {
+    const ranges = {
+      duration_seconds: () => Math.floor(Math.random() * 300) + 60, // 1-5 minutes
+      play_count: () => Math.floor(Math.random() * 1000),
+      rating: () => Math.floor(Math.random() * 5) + 1, // 1-5
+      age: () => Math.floor(Math.random() * 50) + 18, // 18-68
+      price: () => Math.floor(Math.random() * 10000) + 100, // cents
+      quantity: () => Math.floor(Math.random() * 100) + 1,
+    };
+
+    if (ranges[fieldName as keyof typeof ranges]) {
+      return ranges[fieldName as keyof typeof ranges]();
+    }
+
+    // Default fallback
+    return Math.floor(Math.random() * 100) + 1;
   }
 
   // ---------------- Frontend Suggestions ----------------
@@ -562,13 +981,339 @@ export class DatabaseAgent {
       type: "integrating",
       message: "Generating frontend integration suggestions",
     });
+
     console.log(chalk.green("\n🔗 Frontend Integration:"));
-    schemaDefinitions.forEach((def) => {
+
+    for (const def of schemaDefinitions) {
       const apiEndpoint = `/api/${def.tableName.replace(/_/g, "-")}`;
+      const hookName = `use${toPascalCase(def.tableName)}`;
+
       console.log(chalk.blue(`\n📡 API Endpoint: ${apiEndpoint}`));
-      console.log(chalk.gray(`   GET    ${apiEndpoint}`));
-      console.log(chalk.gray(`   POST   ${apiEndpoint}`));
-      console.log(chalk.gray(`   DELETE ${apiEndpoint}?id=123`));
-    });
+      console.log(
+        chalk.gray(
+          `   GET    ${apiEndpoint}                    - Fetch all records`
+        )
+      );
+      console.log(
+        chalk.gray(
+          `   GET    ${apiEndpoint}?id=123             - Fetch specific record`
+        )
+      );
+      console.log(
+        chalk.gray(
+          `   GET    ${apiEndpoint}?limit=10&offset=0  - Paginated fetch`
+        )
+      );
+      if (def.fields.some((f) => f.name === "user_id")) {
+        console.log(
+          chalk.gray(
+            `   GET    ${apiEndpoint}?user_id=abc       - Filter by user`
+          )
+        );
+      }
+      console.log(
+        chalk.gray(
+          `   POST   ${apiEndpoint}                    - Create new record`
+        )
+      );
+      console.log(
+        chalk.gray(
+          `   PUT    ${apiEndpoint}?id=123             - Update record`
+        )
+      );
+      console.log(
+        chalk.gray(
+          `   DELETE ${apiEndpoint}?id=123             - Delete record`
+        )
+      );
+
+      // Generate React hook
+      await this.generateReactHook(def);
+      console.log(
+        chalk.cyan(`   🪝 React Hook: ${hookName} (generated in hooks/)`)
+      );
+    }
+
+    console.log(chalk.green("\n📋 Usage Examples:"));
+    console.log(
+      chalk.gray(`
+// Fetch data in a React component:
+import { ${schemaDefinitions
+        .map((def) => `use${toPascalCase(def.tableName)}`)
+        .join(", ")} } from '@/hooks';
+
+function MyComponent() {
+  const { data, loading, error, create, update, delete: remove } = use${toPascalCase(
+    schemaDefinitions[0].tableName
+  )}();
+
+  // Fetch all records
+  useEffect(() => {
+    data.fetchAll();
+  }, []);
+
+  // Create new record
+  const handleCreate = async () => {
+    await create({ /* your data */ });
+  };
+
+  return (
+    <div>
+      {loading && <p>Loading...</p>}
+      {error && <p>Error: {error}</p>}
+      {data.records.map(record => (
+        <div key={record.id}>{/* render record */}</div>
+      ))}
+    </div>
+  );
+}
+    `)
+    );
+  }
+
+  private async generateReactHook(schemaDef: SchemaDefinition) {
+    const tableName = schemaDef.tableName;
+    const className = toPascalCase(tableName);
+    const hookName = `use${className}`;
+    const apiEndpoint = `/api/${tableName.replace(/_/g, "-")}`;
+
+    const hookContent = `import { useState, useCallback } from 'react';
+import { ${className}, New${className} } from '@/db/schema';
+
+interface ${className}State {
+  records: ${className}[];
+  loading: boolean;
+  error: string | null;
+  pagination: {
+    limit: number;
+    offset: number;
+    total: number;
+    hasMore: boolean;
+  } | null;
+}
+
+interface ${className}Actions {
+  fetchAll: (params?: { limit?: number; offset?: number; user_id?: string }) => Promise<void>;
+  fetchById: (id: number) => Promise<${className} | null>;
+  create: (data: New${className}) => Promise<${className} | null>;
+  update: (id: number, data: Partial<New${className}>) => Promise<${className} | null>;
+  delete: (id: number) => Promise<boolean>;
+  clearError: () => void;
+}
+
+export function ${hookName}() {
+  const [state, setState] = useState<${className}State>({
+    records: [],
+    loading: false,
+    error: null,
+    pagination: null,
+  });
+
+  const setLoading = (loading: boolean) => {
+    setState(prev => ({ ...prev, loading }));
+  };
+
+  const setError = (error: string | null) => {
+    setState(prev => ({ ...prev, error }));
+  };
+
+  const clearError = useCallback(() => {
+    setError(null);
+  }, []);
+
+  const fetchAll = useCallback(async (params?: { limit?: number; offset?: number; user_id?: string }) => {
+    setLoading(true);
+    setError(null);
+
+    try {
+      const searchParams = new URLSearchParams();
+      if (params?.limit) searchParams.set('limit', params.limit.toString());
+      if (params?.offset) searchParams.set('offset', params.offset.toString());
+      if (params?.user_id) searchParams.set('user_id', params.user_id);
+
+      const response = await fetch(\`${apiEndpoint}?\${searchParams}\`);
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error || 'Failed to fetch ${tableName}');
+      }
+
+      setState(prev => ({
+        ...prev,
+        records: result.data,
+        pagination: result.pagination,
+        loading: false,
+      }));
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'Unknown error');
+      setLoading(false);
+    }
+  }, []);
+
+  const fetchById = useCallback(async (id: number): Promise<${className} | null> => {
+    setLoading(true);
+    setError(null);
+
+    try {
+      const response = await fetch(\`${apiEndpoint}?id=\${id}\`);
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error || 'Failed to fetch ${tableName}');
+      }
+
+      setLoading(false);
+      return result.data;
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'Unknown error');
+      setLoading(false);
+      return null;
+    }
+  }, []);
+
+  const create = useCallback(async (data: New${className}): Promise<${className} | null> => {
+    setLoading(true);
+    setError(null);
+
+    try {
+      const response = await fetch('${apiEndpoint}', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(data),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error || 'Failed to create ${tableName}');
+      }
+
+      // Add new record to the beginning of the list
+      setState(prev => ({
+        ...prev,
+        records: [result.data, ...prev.records],
+        loading: false,
+      }));
+
+      return result.data;
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'Unknown error');
+      setLoading(false);
+      return null;
+    }
+  }, []);
+
+  const update = useCallback(async (id: number, data: Partial<New${className}>): Promise<${className} | null> => {
+    setLoading(true);
+    setError(null);
+
+    try {
+      const response = await fetch(\`${apiEndpoint}?id=\${id}\`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(data),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error || 'Failed to update ${tableName}');
+      }
+
+      // Update the record in the list
+      setState(prev => ({
+        ...prev,
+        records: prev.records.map(record =>
+          record.id === id ? result.data : record
+        ),
+        loading: false,
+      }));
+
+      return result.data;
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'Unknown error');
+      setLoading(false);
+      return null;
+    }
+  }, []);
+
+  const deleteRecord = useCallback(async (id: number): Promise<boolean> => {
+    setLoading(true);
+    setError(null);
+
+    try {
+      const response = await fetch(\`${apiEndpoint}?id=\${id}\`, {
+        method: 'DELETE',
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error || 'Failed to delete ${tableName}');
+      }
+
+      // Remove the record from the list
+      setState(prev => ({
+        ...prev,
+        records: prev.records.filter(record => record.id !== id),
+        loading: false,
+      }));
+
+      return true;
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'Unknown error');
+      setLoading(false);
+      return false;
+    }
+  }, []);
+
+  const actions: ${className}Actions = {
+    fetchAll,
+    fetchById,
+    create,
+    update,
+    delete: deleteRecord,
+    clearError,
+  };
+
+  return {
+    data: state,
+    loading: state.loading,
+    error: state.error,
+    ...actions,
+  };
+}
+`;
+
+    const hooksDir = path.join(process.cwd(), "src", "hooks");
+    const hookPath = path.join(hooksDir, `${hookName}.ts`);
+
+    fs.mkdirSync(hooksDir, { recursive: true });
+    fs.writeFileSync(hookPath, hookContent);
+
+    // Update hooks index file
+    await this.updateHooksIndex();
+  }
+
+  private async updateHooksIndex() {
+    const hooksDir = path.join(process.cwd(), "src", "hooks");
+    const indexPath = path.join(hooksDir, "index.ts");
+
+    if (fs.existsSync(hooksDir)) {
+      const hookFiles = fs
+        .readdirSync(hooksDir)
+        .filter((f) => f.endsWith(".ts") && f !== "index.ts")
+        .map((f) => f.replace(".ts", ""));
+
+      const indexContent = `// Auto-generated hooks index
+${hookFiles.map((f) => `export * from './${f}';`).join("\n")}
+`;
+
+      fs.writeFileSync(indexPath, indexContent);
+    }
   }
 }
