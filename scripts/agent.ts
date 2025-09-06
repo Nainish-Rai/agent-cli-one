@@ -20,8 +20,22 @@ interface AgentStep {
     | "editing"
     | "migrating"
     | "generating"
-    | "integrating";
+    | "integrating"
+    | "seeding";
   message: string;
+}
+
+interface SchemaField {
+  name: string;
+  type: "serial" | "text" | "timestamp" | "integer" | "boolean" | "uuid";
+  constraints?: string[];
+}
+
+interface SchemaDefinition {
+  tableName: string;
+  fileName: string;
+  fields: SchemaField[];
+  relationships?: string[];
 }
 
 class DatabaseAgent {
@@ -43,9 +57,10 @@ class DatabaseAgent {
     }
 
     this.genAI = apiKey ? new GoogleGenerativeAI(apiKey) : null;
-    this.model = apiKey
-      ? this.genAI.getGenerativeModel({ model: "gemini-1.5-flash" })
-      : null;
+    this.model =
+      apiKey && this.genAI
+        ? this.genAI.getGenerativeModel({ model: "gemini-1.5-flash" })
+        : null;
   }
 
   private log(step: AgentStep) {
@@ -57,6 +72,7 @@ class DatabaseAgent {
       migrating: "🔄",
       generating: "⚡",
       integrating: "🔗",
+      seeding: "🌱",
     };
 
     console.log(chalk.cyan(`${icons[step.type]} ${step.message}`));
@@ -129,287 +145,48 @@ Focus on:
       message: "Understanding your requirements...",
     });
 
-    let plan;
+    // Parse the query to extract schema requirements
+    const schemaDefinitions = await this.parseQueryForSchemas(query);
 
-    if (this.model) {
-      // Use AI if available
-      const prompt = `${this.getSystemPrompt()}
-
-Project Context:
-${projectContext}
-
-User Query: "${query}"
-
-Please analyze this query and provide a detailed implementation plan.`;
-
-      try {
-        this.startSpinner("Consulting AI assistant...");
-        const result = await this.model.generateContent(prompt);
-        const response = await result.response;
-        const text = response.text();
-        this.stopSpinner(true, "AI analysis complete");
-
-        // Parse the AI response and extract steps
-        plan = this.parseAIResponse(text);
-      } catch (error) {
-        this.stopSpinner(false, "AI analysis failed");
-        console.log(chalk.yellow("⚠️  Falling back to built-in analysis..."));
-        plan = this.createFallbackPlan(query);
-      }
-    } else {
-      // Use fallback analysis
-      this.startSpinner("Analyzing with built-in intelligence...");
-      await new Promise((resolve) => setTimeout(resolve, 1000)); // Simulate processing
-      this.stopSpinner(true, "Analysis complete");
-      plan = this.createFallbackPlan(query);
-    }
-
-    if (plan) {
-      console.log(chalk.green("\n📋 Implementation Plan:"));
-      console.log(chalk.blue(plan.summary));
-      console.log();
-
-      // Execute each step
-      for (const step of plan.steps) {
-        this.log({ type: step.type as any, message: step.message });
-
-        if (step.action !== "analysis") {
-          // For now, just show what would be done
-          if (step.files && step.files.length > 0) {
-            console.log(chalk.gray(`   📁 Files: ${step.files.join(", ")}`));
-          }
-        }
-
-        // Add small delay for dramatic effect
-        await new Promise((resolve) => setTimeout(resolve, 500));
-      }
-
+    if (schemaDefinitions.length === 0) {
       console.log(
-        chalk.green(
-          "\n✅ Planning complete! Ready to implement database features."
+        chalk.yellow(
+          "⚠️  No database schema requirements detected in your query."
         )
       );
-
-      if (!this.model) {
-        console.log(
-          chalk.yellow(
-            "💡 Tip: Add GEMINI_API_KEY to your .env file for AI-powered implementation planning."
-          )
-        );
-      }
-    }
-  }
-
-  private createFallbackPlan(query: string): any {
-    const lowerQuery = query.toLowerCase();
-
-    // Analyze query for specific patterns
-    if (
-      lowerQuery.includes("recently played") ||
-      lowerQuery.includes("recent")
-    ) {
-      return {
-        steps: [
-          {
-            type: "creating",
-            message: "Creating recently played songs schema",
-            action: "schema",
-            files: ["src/db/schema/recently-played.ts"],
-          },
-          {
-            type: "migrating",
-            message: "Running database migrations",
-            action: "migration",
-            files: ["src/db/migrations/0001_create_recently_played.sql"],
-          },
-          {
-            type: "generating",
-            message: "Generating API route for recently played songs",
-            action: "api",
-            files: ["src/app/api/recently-played/route.ts"],
-          },
-          {
-            type: "integrating",
-            message: "Integrating with Spotify main content component",
-            action: "frontend",
-            files: ["src/components/spotify-main-content.tsx"],
-          },
-        ],
-        summary:
-          "Complete recently played songs feature with database, API, and UI integration",
-      };
+      console.log(
+        chalk.gray(
+          "   Try queries like: 'store recently played songs' or 'create user profiles table'"
+        )
+      );
+      return;
     }
 
-    if (
-      lowerQuery.includes("made for you") ||
-      lowerQuery.includes("popular albums")
-    ) {
-      return {
-        steps: [
-          {
-            type: "creating",
-            message: "Creating made for you and popular albums schemas",
-            action: "schema",
-            files: [
-              "src/db/schema/made-for-you.ts",
-              "src/db/schema/popular-albums.ts",
-            ],
-          },
-          {
-            type: "migrating",
-            message: "Running database migrations for new tables",
-            action: "migration",
-            files: ["src/db/migrations/0002_create_recommendations.sql"],
-          },
-          {
-            type: "generating",
-            message: "Generating API routes for recommendations",
-            action: "api",
-            files: [
-              "src/app/api/made-for-you/route.ts",
-              "src/app/api/popular-albums/route.ts",
-            ],
-          },
-          {
-            type: "integrating",
-            message: "Updating main content with recommendation data",
-            action: "frontend",
-            files: ["src/components/spotify-main-content.tsx"],
-          },
-        ],
-        summary:
-          "Recommendation system with Made for You and Popular Albums tables",
-      };
+    console.log(chalk.green("\n📋 Implementation Plan:"));
+    console.log(
+      chalk.blue(
+        `Creating ${schemaDefinitions.length} database table(s) with migrations and seeding`
+      )
+    );
+    console.log();
+
+    // Execute implementation steps
+    for (const schemaDef of schemaDefinitions) {
+      await this.implementSchema(schemaDef);
     }
 
-    // Generic fallback for other database-related queries
-    const steps = [];
+    // Run migrations
+    await this.runMigrations();
 
-    if (lowerQuery.includes("table") || lowerQuery.includes("schema")) {
-      steps.push({
-        type: "creating",
-        message: "Creating database schema definition",
-        action: "schema",
-        files: ["src/db/schema/new-feature.ts"],
-      });
+    // Generate and run seeds
+    for (const schemaDef of schemaDefinitions) {
+      await this.generateSeedData(schemaDef);
     }
 
-    if (lowerQuery.includes("migration") || steps.length > 0) {
-      steps.push({
-        type: "migrating",
-        message: "Running database migrations",
-        action: "migration",
-        files: ["src/db/migrations/"],
-      });
-    }
-
-    if (
-      lowerQuery.includes("api") ||
-      lowerQuery.includes("endpoint") ||
-      steps.length > 0
-    ) {
-      steps.push({
-        type: "generating",
-        message: "Generating API route",
-        action: "api",
-        files: ["src/app/api/new-feature/route.ts"],
-      });
-    }
-
-    if (
-      lowerQuery.includes("frontend") ||
-      lowerQuery.includes("ui") ||
-      steps.length > 0
-    ) {
-      steps.push({
-        type: "integrating",
-        message: "Integrating with frontend UI",
-        action: "frontend",
-        files: ["src/components/"],
-      });
-    }
-
-    return {
-      steps:
-        steps.length > 0
-          ? steps
-          : [
-              {
-                type: "analyzing",
-                message: "Analyzing requirements and planning implementation",
-                action: "analysis",
-                files: [],
-              },
-            ],
-      summary: "Custom database feature implementation planned",
-    };
-  }
-
-  private parseAIResponse(text: string): any {
-    try {
-      // Try to extract JSON from the response
-      const jsonMatch = text.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        return JSON.parse(jsonMatch[0]);
-      }
-    } catch (error) {
-      // Fallback to manual parsing if JSON parsing fails
-    }
-
-    // Fallback: create a simple plan based on keywords
-    const query = text.toLowerCase();
-    const steps = [];
-
-    if (query.includes("table") || query.includes("schema")) {
-      steps.push({
-        type: "creating",
-        message: "Creating database schema definition",
-        action: "schema",
-        files: ["src/db/schema/new-schema.ts"],
-      });
-    }
-
-    if (query.includes("migration")) {
-      steps.push({
-        type: "migrating",
-        message: "Running database migrations",
-        action: "migration",
-        files: ["src/db/migrations/"],
-      });
-    }
-
-    if (query.includes("api") || query.includes("route")) {
-      steps.push({
-        type: "generating",
-        message: "Generating API route",
-        action: "api",
-        files: ["src/app/api/new-endpoint/route.ts"],
-      });
-    }
-
-    if (query.includes("frontend") || query.includes("ui")) {
-      steps.push({
-        type: "integrating",
-        message: "Integrating with frontend UI",
-        action: "frontend",
-        files: ["src/components/"],
-      });
-    }
-
-    return {
-      steps:
-        steps.length > 0
-          ? steps
-          : [
-              {
-                type: "analyzing",
-                message: "Analyzing requirements and planning implementation",
-                action: "analysis",
-                files: [],
-              },
-            ],
-      summary: "Database feature implementation planned",
-    };
+    console.log(chalk.green("\n✅ Database implementation complete!"));
+    console.log(
+      chalk.cyan("🚀 Your new database tables are ready with sample data.")
+    );
   }
 
   private async getProjectContext(): Promise<string> {
@@ -458,6 +235,432 @@ Please analyze this query and provide a detailed implementation plan.`;
 
     return context.join("\n");
   }
+
+  private async parseQueryForSchemas(
+    query: string
+  ): Promise<SchemaDefinition[]> {
+    if (!this.model) {
+      console.log(
+        chalk.red("❌ GEMINI_API_KEY is required for schema generation")
+      );
+      console.log(chalk.yellow("💡 Add your Gemini API key to .env file:"));
+      console.log(chalk.gray("   GEMINI_API_KEY=your_api_key_here"));
+      return [];
+    }
+
+    try {
+      const schemaPrompt = `You are a database schema expert. Analyze the following user query and extract database schema requirements.
+
+User Query: "${query}"
+
+Respond with a JSON array of schema definitions. Each schema should have:
+- tableName: snake_case table name
+- fileName: kebab-case filename (with .ts extension)
+- fields: array of field objects with name, type, and constraints
+
+Available field types: serial, text, timestamp, integer, boolean, uuid
+Available constraints: primaryKey(), notNull(), defaultNow(), default(value)
+
+Example response:
+[
+  {
+    "tableName": "user_profiles",
+    "fileName": "user-profiles.ts",
+    "fields": [
+      {"name": "id", "type": "serial", "constraints": ["primaryKey()"]},
+      {"name": "username", "type": "text", "constraints": ["notNull()"]},
+      {"name": "email", "type": "text", "constraints": ["notNull()"]},
+      {"name": "created_at", "type": "timestamp", "constraints": ["defaultNow()", "notNull()"]}
+    ]
+  }
+]
+
+Important guidelines:
+- Always include an "id" field with serial type and primaryKey() constraint
+- Add created_at and updated_at timestamps for most tables
+- Use appropriate field types based on the data being stored
+- Include proper constraints like notNull() for required fields
+- Think about the relationships and data that would be needed for a Spotify-like application
+- If the query mentions storing user data, include user_id field
+- For music-related tables, include relevant fields like song_id, artist, title, duration, etc.
+
+Analyze the query and generate appropriate schema definitions:`;
+
+      this.startSpinner("Analyzing query with AI...");
+      const result = await this.model.generateContent(schemaPrompt);
+      const response = await result.response;
+      const text = response.text();
+      this.stopSpinner(true, "AI analysis complete");
+
+      // Try to extract JSON from the AI response
+      const jsonMatch = text.match(/\[[\s\S]*\]/);
+      if (jsonMatch) {
+        const aiSchemas = JSON.parse(jsonMatch[0]);
+        return aiSchemas;
+      } else {
+        console.log(chalk.yellow("⚠️  Could not parse AI response as JSON"));
+        console.log(chalk.gray("AI Response:"), text);
+        return [];
+      }
+    } catch (error) {
+      this.stopSpinner(false, "AI parsing failed");
+      console.log(chalk.red(`❌ Error analyzing query: ${error.message}`));
+      console.log(
+        chalk.yellow("💡 Please check your GEMINI_API_KEY and try again")
+      );
+      return [];
+    }
+  }
+
+  private async implementSchema(schemaDef: SchemaDefinition) {
+    this.log({
+      type: "creating",
+      message: `Creating ${schemaDef.tableName} schema definition`,
+    });
+
+    const schemaContent = this.generateSchemaContent(schemaDef);
+    const schemaPath = path.join(
+      process.cwd(),
+      "src",
+      "db",
+      "schema",
+      schemaDef.fileName
+    );
+
+    // Ensure schema directory exists
+    const schemaDir = path.dirname(schemaPath);
+    if (!fs.existsSync(schemaDir)) {
+      fs.mkdirSync(schemaDir, { recursive: true });
+    }
+
+    // Write schema file
+    fs.writeFileSync(schemaPath, schemaContent);
+
+    console.log(chalk.gray(`   📁 Created: ${schemaDef.fileName}`));
+
+    // Small delay for visual effect
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+
+  private generateSchemaContent(schemaDef: SchemaDefinition): string {
+    const imports = new Set(["pgTable"]);
+
+    // Collect all field types needed for imports
+    schemaDef.fields.forEach((field) => {
+      switch (field.type) {
+        case "serial":
+          imports.add("serial");
+          break;
+        case "text":
+          imports.add("text");
+          break;
+        case "timestamp":
+          imports.add("timestamp");
+          break;
+        case "integer":
+          imports.add("integer");
+          break;
+        case "boolean":
+          imports.add("boolean");
+          break;
+        case "uuid":
+          imports.add("uuid");
+          break;
+      }
+    });
+
+    const importStatement = `import { ${Array.from(imports).join(
+      ", "
+    )} } from "drizzle-orm/pg-core";`;
+
+    const fields = schemaDef.fields
+      .map((field) => {
+        const constraints = field.constraints
+          ? `.${field.constraints.join(".")}`
+          : "";
+        return `  ${field.name}: ${field.type}("${field.name}")${constraints},`;
+      })
+      .join("\n");
+
+    return `${importStatement}
+
+export const ${schemaDef.tableName} = pgTable("${schemaDef.tableName}", {
+${fields}
+});
+
+export type ${toPascalCase(schemaDef.tableName)} = typeof ${
+      schemaDef.tableName
+    }.$inferSelect;
+export type New${toPascalCase(schemaDef.tableName)} = typeof ${
+      schemaDef.tableName
+    }.$inferInsert;
+`;
+  }
+
+  private async runMigrations() {
+    this.log({
+      type: "migrating",
+      message: "Generating and applying database migrations",
+    });
+
+    this.startSpinner("Generating migration files...");
+
+    try {
+      // Generate migrations
+      execSync("npx drizzle-kit generate", {
+        stdio: "pipe",
+        cwd: process.cwd(),
+      });
+
+      this.stopSpinner(true, "Migration files generated");
+
+      this.startSpinner("Applying migrations to database...");
+
+      // Push migrations to database
+      execSync("npx drizzle-kit push", {
+        stdio: "pipe",
+        cwd: process.cwd(),
+      });
+
+      this.stopSpinner(true, "Migrations applied successfully");
+    } catch (error) {
+      this.stopSpinner(false, "Migration failed");
+      console.log(chalk.red(`❌ Migration error: ${error.message}`));
+      console.log(
+        chalk.yellow(
+          "💡 Make sure your database is running and DATABASE_URL is configured"
+        )
+      );
+    }
+  }
+
+  private async generateSeedData(schemaDef: SchemaDefinition) {
+    this.log({
+      type: "seeding",
+      message: `Generating seed data for ${schemaDef.tableName}`,
+    });
+
+    const seedContent = this.generateSeedContent(schemaDef);
+    const seedPath = path.join(
+      process.cwd(),
+      "scripts",
+      `seed-${schemaDef.tableName}.ts`
+    );
+
+    // Ensure scripts directory exists
+    const scriptsDir = path.dirname(seedPath);
+    if (!fs.existsSync(scriptsDir)) {
+      fs.mkdirSync(scriptsDir, { recursive: true });
+    }
+
+    // Write seed file
+    fs.writeFileSync(seedPath, seedContent);
+
+    console.log(chalk.gray(`   📁 Created: seed-${schemaDef.tableName}.ts`));
+
+    // Execute seeding
+    this.startSpinner(`Seeding ${schemaDef.tableName} with sample data...`);
+
+    try {
+      execSync(`npx tsx scripts/seed-${schemaDef.tableName}.ts`, {
+        stdio: "pipe",
+        cwd: process.cwd(),
+      });
+      this.stopSpinner(true, `${schemaDef.tableName} seeded successfully`);
+    } catch (error) {
+      this.stopSpinner(false, `Seeding failed for ${schemaDef.tableName}`);
+      console.log(
+        chalk.yellow(
+          `⚠️  Manual seeding available: npm run tsx scripts/seed-${schemaDef.tableName}.ts`
+        )
+      );
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+
+  private generateSeedContent(schemaDef: SchemaDefinition): string {
+    const tableName = schemaDef.tableName;
+    const className = toPascalCase(tableName);
+
+    let sampleData = "";
+
+    switch (tableName) {
+      case "recently_played":
+        sampleData = `
+  {
+    user_id: "user_123",
+    song_id: "song_001",
+    song_title: "Blinding Lights",
+    artist: "The Weeknd",
+    album: "After Hours",
+    duration: 200,
+  },
+  {
+    user_id: "user_123",
+    song_id: "song_002",
+    song_title: "Watermelon Sugar",
+    artist: "Harry Styles",
+    album: "Fine Line",
+    duration: 174,
+  },
+  {
+    user_id: "user_123",
+    song_id: "song_003",
+    song_title: "Good 4 U",
+    artist: "Olivia Rodrigo",
+    album: "SOUR",
+    duration: 178,
+  },
+  {
+    user_id: "user_456",
+    song_id: "song_004",
+    song_title: "Levitating",
+    artist: "Dua Lipa",
+    album: "Future Nostalgia",
+    duration: 203,
+  },
+  {
+    user_id: "user_456",
+    song_id: "song_005",
+    song_title: "drivers license",
+    artist: "Olivia Rodrigo",
+    album: "SOUR",
+    duration: 242,
+  }`;
+        break;
+
+      case "made_for_you":
+        sampleData = `
+  {
+    user_id: "user_123",
+    playlist_name: "Discover Weekly",
+    description: "Your weekly mixtape of fresh music",
+    cover_image: "/images/discover-weekly.jpg",
+    song_count: 30,
+  },
+  {
+    user_id: "user_123",
+    playlist_name: "Release Radar",
+    description: "Catch all the latest music from artists you follow",
+    cover_image: "/images/release-radar.jpg",
+    song_count: 25,
+  },
+  {
+    user_id: "user_456",
+    playlist_name: "Daily Mix 1",
+    description: "Made for you • Olivia Rodrigo, Taylor Swift, and more",
+    cover_image: "/images/daily-mix-1.jpg",
+    song_count: 50,
+  },
+  {
+    user_id: "user_456",
+    playlist_name: "On Repeat",
+    description: "Songs you can't stop playing",
+    cover_image: "/images/on-repeat.jpg",
+    song_count: 20,
+  }`;
+        break;
+
+      case "popular_albums":
+        sampleData = `
+  {
+    album_id: "album_001",
+    title: "Midnights",
+    artist: "Taylor Swift",
+    cover_image: "/images/midnights.jpg",
+    release_date: new Date("2022-10-21"),
+    popularity_score: 95,
+    genre: "Pop",
+  },
+  {
+    album_id: "album_002",
+    title: "Harry's House",
+    artist: "Harry Styles",
+    cover_image: "/images/harrys-house.jpg",
+    release_date: new Date("2022-05-20"),
+    popularity_score: 92,
+    genre: "Pop Rock",
+  },
+  {
+    album_id: "album_003",
+    title: "Un Verano Sin Ti",
+    artist: "Bad Bunny",
+    cover_image: "/images/un-verano-sin-ti.jpg",
+    release_date: new Date("2022-05-06"),
+    popularity_score: 90,
+    genre: "Reggaeton",
+  },
+  {
+    album_id: "album_004",
+    title: "SOUR",
+    artist: "Olivia Rodrigo",
+    cover_image: "/images/sour.jpg",
+    release_date: new Date("2021-05-21"),
+    popularity_score: 88,
+    genre: "Pop",
+  },
+  {
+    album_id: "album_005",
+    title: "Happier Than Ever",
+    artist: "Billie Eilish",
+    cover_image: "/images/happier-than-ever.jpg",
+    release_date: new Date("2021-07-30"),
+    popularity_score: 85,
+    genre: "Alternative",
+  }`;
+        break;
+
+      default:
+        sampleData = `
+  // Add your sample data here
+  // Example: { field1: "value1", field2: "value2" }`;
+    }
+
+    return `import { drizzle } from "drizzle-orm/node-postgres";
+import { Client } from "pg";
+import dotenv from "dotenv";
+import { ${tableName} } from "../src/db/schema/${schemaDef.fileName.replace(
+      ".ts",
+      ""
+    )}";
+
+dotenv.config();
+
+async function seed() {
+  const client = new Client({
+    connectionString: process.env.DATABASE_URL || "postgresql://localhost:5432/spotify_clone",
+  });
+
+  await client.connect();
+  const db = drizzle(client);
+
+  console.log("🌱 Seeding ${tableName}...");
+
+  const sampleData = [${sampleData}
+  ];
+
+  try {
+    await db.insert(${tableName}).values(sampleData);
+    console.log("✅ ${tableName} seeded successfully!");
+  } catch (error) {
+    console.error("❌ Error seeding ${tableName}:", error);
+  } finally {
+    await client.end();
+  }
+}
+
+seed().catch(console.error);
+`;
+  }
+}
+
+// Helper function to convert snake_case to PascalCase
+function toPascalCase(str: string): string {
+  return str
+    .split("_")
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join("");
 }
 
 // CLI Program
