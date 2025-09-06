@@ -6,9 +6,11 @@
     "dev": "next dev --turbopack",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "agent": "tsx scripts/agent.ts"
   },
   "dependencies": {
+    "@google/generative-ai": "^0.24.1",
     "@headlessui/react": "^2.2.4",
     "@heroicons/react": "^2.2.0",
     "@hookform/resolvers": "^5.1.1",
@@ -45,10 +47,12 @@
     "@tsparticles/engine": "^3.8.1",
     "@tsparticles/react": "^3.0.0",
     "@tsparticles/slim": "^3.8.1",
+    "chalk": "^5.6.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
     "cobe": "^0.6.4",
+    "commander": "^14.0.0",
     "date-fns": "^4.1.0",
     "dotenv": "^17.2.2",
     "dotted-map": "^2.2.3",
@@ -61,6 +65,7 @@
     "motion": "^12.23.0",
     "next": "15.3.5",
     "next-themes": "^0.4.6",
+    "ora": "^8.2.0",
     "pg": "^8.16.3",
     "qss": "^3.0.0",
     "react": "^19.0.0",
@@ -81,6 +86,7 @@
     "tailwindcss-animate": "^1.0.7",
     "three": "^0.178.0",
     "three-globe": "^2.43.0",
+    "tsx": "^4.20.5",
     "vaul": "^1.1.2",
     "zod": "^3.25.74"
   },
