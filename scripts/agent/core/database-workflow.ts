@@ -41,10 +41,8 @@ export class DatabaseWorkflow extends BaseAgent {
     const all = [
       ...new Set([...existing, ...schemaDefinitions.map((d) => d.fileName)]),
     ];
-    fs.writeFileSync(
-      indexPath,
-      schemaGenerator.generateSchemaIndexContent(all)
-    );
+    const indexContent = await schemaGenerator.generateSchemaIndexContent(all);
+    fs.writeFileSync(indexPath, indexContent);
     console.log(chalk.gray("   📁 Updated: schema/index.ts"));
   }
 
