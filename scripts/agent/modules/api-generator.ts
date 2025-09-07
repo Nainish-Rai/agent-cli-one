@@ -72,21 +72,53 @@ Table Information:
 Requirements:
 1. Use Next.js 14+ App Router (NextRequest, NextResponse)
 2. Use Drizzle ORM with PostgreSQL
-3. Import types from "@/db/schema"
-4. Implement GET, POST, PUT, DELETE methods
-5. Support pagination (limit, offset)
-6. Support filtering by id and user_id (if applicable)
-7. Include proper error handling and validation
-8. Use proper TypeScript types
-9. Return consistent JSON responses with success/error format
-10. NO COMMENTS in the generated code
+3. Import from "drizzle-orm/node-postgres" (NOT "drizzle-orm/pg-core")
+4. Import table and types from "@/db/schema"
+5. Implement GET, POST, PUT, DELETE methods
+6. Support pagination (limit, offset)
+7. Support filtering by id and user_id (if applicable)
+8. Include proper error handling and validation
+9. Use proper TypeScript types
+10. Return consistent JSON responses with success/error format
+11. NO COMMENTS in the generated code
+12. Use proper database connection string format
+13. Handle SSL for cloud databases (neon.tech detection)
+14. Avoid query reassignment - use separate queries for different conditions
 
-Database setup:
+Database setup template:
 \`\`\`typescript
+import { drizzle } from "drizzle-orm/node-postgres";
+import { Pool } from "pg";
+
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL || "postgresql://localhost:5432/spotify_clone"
+  connectionString: process.env.DATABASE_URL || "postgresql://localhost:5432/spotify_clone",
+  ssl: process.env.DATABASE_URL?.includes('neon.tech') ? { rejectUnauthorized: false } : false
 });
 const db = drizzle(pool);
+\`\`\`
+
+Import pattern:
+\`\`\`typescript
+import { ${tableName}, type ${className}, type New${className} } from "@/db/schema";
+\`\`\`
+
+Query pattern for conditional WHERE clauses:
+\`\`\`typescript
+const whereConditions = [];
+if (condition) {
+  whereConditions.push(eq(table.field, value));
+}
+const whereClause = whereConditions.length > 0
+  ? (whereConditions.length === 1 ? whereConditions[0] : and(...whereConditions))
+  : undefined;
+
+const records = await db
+  .select()
+  .from(${tableName})
+  .where(whereClause)
+  .orderBy(desc(${tableName}.created_at))
+  .limit(limit)
+  .offset(offset);
 \`\`\`
 
 Response format:
@@ -96,6 +128,8 @@ Response format:
 \`\`\`
 
 Generate the complete API route file with all imports and exports. Use modern TypeScript and follow Next.js 14+ best practices.
+
+CRITICAL: Ensure the database connection string is properly terminated and uses correct imports.
 
 Generate ONLY the TypeScript code, no explanation or markdown formatting. Do not include any comments in the code.`;
 
@@ -109,11 +143,52 @@ Generate ONLY the TypeScript code, no explanation or markdown formatting. Do not
         .replace(/\/\/[^\n]*\n/g, "")
         .replace(/\/\*[\s\S]*?\*\//g, "");
 
+      // Post-process to fix common issues
+      generatedCode = this.postProcessGeneratedCode(generatedCode, schemaDef);
+
       return generatedCode;
     } catch (error) {
       console.log(chalk.red(`❌ Error generating API route: ${error}`));
       return this.generateApiRouteContentFallback(schemaDef);
     }
+  }
+
+  private postProcessGeneratedCode(
+    code: string,
+    schemaDef: SchemaDefinition
+  ): string {
+    const tableName = schemaDef.tableName;
+    const className = toPascalCase(tableName);
+
+    // Fix common issues in generated code
+    let fixedCode = code;
+
+    // Ensure proper connection string termination
+    fixedCode = fixedCode.replace(
+      /connectionString: process\.env\.DATABASE_URL \|\| "postgresql:[^"]*$/gm,
+      `connectionString: process.env.DATABASE_URL || "postgresql://localhost:5432/spotify_clone"`
+    );
+
+    // Ensure correct Drizzle import
+    fixedCode = fixedCode.replace(
+      /from ['"](drizzle-orm\/pg-core|drizzle-orm\/postgres-js)['"]/g,
+      'from "drizzle-orm/node-postgres"'
+    );
+
+    // Fix type import patterns
+    fixedCode = fixedCode.replace(/\$inferSelect|\$inferInsert/g, (match) =>
+      match === "$inferSelect" ? className : `New${className}`
+    );
+
+    // Ensure proper table import
+    if (!fixedCode.includes(`{ ${tableName},`)) {
+      fixedCode = fixedCode.replace(
+        /import.*from "@\/db\/schema";/,
+        `import { ${tableName}, type ${className}, type New${className} } from "@/db/schema";`
+      );
+    }
+
+    return fixedCode;
   }
 
   private generateApiRouteContentFallback(schemaDef: SchemaDefinition): string {
