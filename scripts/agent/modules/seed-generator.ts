@@ -18,12 +18,16 @@ export class SeedGenerator {
 
   async generateSeedData(schemaDef: SchemaDefinition) {
     if (!this.model) {
-      console.log(chalk.yellow("⚠️  No model set, using fallback seed data"));
-      const seedContent = this.generateSeedContentFallback(schemaDef);
-      await this.writeSeedFile(schemaDef, seedContent);
-      return;
+      throw new Error(
+        "❌ AI model is required for seed generation. Please set a model using setModel() method."
+      );
     }
 
+    console.log(
+      chalk.blue(
+        `🤖 Generating AI-powered seed data for ${schemaDef.tableName}...`
+      )
+    );
     const seedContent = await this.generateSeedContent(schemaDef);
     await this.writeSeedFile(schemaDef, seedContent);
   }
@@ -46,8 +50,9 @@ export class SeedGenerator {
       console.log(
         chalk.green(`   ✅ ${schemaDef.tableName} seeded successfully`)
       );
-    } catch {
+    } catch (error) {
       console.log(chalk.red(`   ❌ Seeding failed for ${schemaDef.tableName}`));
+      console.log(chalk.red(`   Error: ${error}`));
     }
   }
 
@@ -57,91 +62,66 @@ export class SeedGenerator {
     const tableName = schemaDef.tableName;
     const className = toPascalCase(tableName);
 
+    // Get only the fields that should be populated (exclude auto-generated ones)
     const fieldsInfo = schemaDef.fields
       .filter((f) => !["id", "created_at", "updated_at"].includes(f.name))
       .map((f) => ({
         name: f.name,
         type: f.type,
         isRequired: f.constraints?.includes("notNull()"),
+        constraints: f.constraints || [],
       }));
 
     const seedPrompt = `Generate a TypeScript seed file for a database table with realistic sample data.
 
+CRITICAL: You must strictly follow the provided schema definition and generate seeds that match exactly.
+
 Table Information:
 - Table name: ${tableName}
 - Class name: ${className}
-- File name: ${schemaDef.fileName}
+- Schema file name: ${schemaDef.fileName}
 - Fields to populate: ${JSON.stringify(fieldsInfo, null, 2)}
+- Full schema fields: ${JSON.stringify(schemaDef.fields, null, 2)}
 
-Context: This is for a Spotify clone application, so generate music-related data if the table seems music-related.
+Context: This is for a Spotify clone application. Generate music-related data that makes sense for the table structure.
 
-Requirements:
-1. Generate 10-15 realistic sample records
-2. Use proper TypeScript types
-3. Import from the correct schema file path
-4. Include proper database connection setup
-5. Handle errors appropriately
-6. Generate contextually appropriate data based on field names
-7. Don't include id, created_at, updated_at in sample data (auto-generated)
-8. Use async/await properly
-9. Handle SSL connections for cloud databases
+STRICT Requirements:
+1. Generate 12-20 realistic sample records
+2. Use proper TypeScript types that match the schema exactly
+3. Import from "@/db/schema" using the exact table name: import { ${tableName} } from "@/db/schema";
+4. Include proper database connection setup with SSL handling
+5. Handle errors appropriately with detailed error messages
+6. Generate contextually appropriate data based on field names and types
+7. DO NOT include id, created_at, updated_at in sample data (these are auto-generated)
+8. Use async/await properly with proper error handling
+9. Handle SSL connections for cloud databases (neon.tech detection)
 10. NO COMMENTS in the generated code
+11. Use exact field names and types from the schema definition
+12. Ensure all required fields (notNull) have values
+13. Respect field constraints and types exactly
 
-Common field patterns and appropriate data:
+Field Type Mapping Guidelines:
+- text: String values appropriate for the field name
+- integer: Numeric values appropriate for the field name
+- boolean: true/false values
+- uuid: Valid UUID format strings
+- timestamp: ISO date strings for user-provided timestamps
+- serial: Never include (auto-generated)
+
+Common field patterns for Spotify clone:
 - song_title, track_title, title: Real song titles
 - artist_name, artist: Real artist names
 - album_name, album: Real album names
 - duration_seconds: Realistic song durations (120-300 seconds)
-- genre: Music genres
-- user_id: UUID format or user identifiers
-- recently_played, last_played: Recent timestamps
+- genre: Music genres (Pop, Rock, Hip Hop, R&B, Electronic, etc.)
+- user_id: UUID format identifiers
+- play_count: Numbers between 1-10000
+- is_liked, is_favorited: boolean values
+- recently_played_at, last_played_at: Recent ISO timestamps
 
-Database setup:
+Database setup template:
 \`\`\`typescript
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL || 'postgresql://localhost:5432/spotify_clone',
-  ssl: process.env.DATABASE_URL?.includes('neon.tech') ? { rejectUnauthorized: false } : false
-});
-const db = drizzle(pool);
-\`\`\`
-
-Generate a complete TypeScript seed file with:
-- Proper imports
-- Database connection
-- Sample data array
-- Insert operation
-- Error handling
-- Cleanup
-
-Note: Import schema from "@/db/schema";
-Example: " import { dislikedSongs } from "@/db/schema"; "
-
-Generate ONLY the TypeScript code, no explanation or markdown formatting. Do not include any comments in the code.`;
-
-    try {
-      const result = await this.model.generateContent(seedPrompt);
-      let generatedCode = result.response.text().trim();
-
-      generatedCode = generatedCode
-        .replace(/```typescript\n?/g, "")
-        .replace(/```\n?/g, "")
-        .replace(/\/\/[^\n]*\n/g, "")
-        .replace(/\/\*[\s\S]*?\*\//g, "");
-
-      return generatedCode;
-    } catch (error) {
-      console.log(chalk.red(`❌ Error generating seed content: ${error}`));
-      return this.generateSeedContentFallback(schemaDef);
-    }
-  }
-
-  private generateSeedContentFallback(schemaDef: SchemaDefinition): string {
-    const tableName = schemaDef.tableName;
-    const className = toPascalCase(tableName);
-    const sampleDataGenerator =
-      this.generateSampleDataForSchemaFallback(schemaDef);
-
-    return `import { drizzle } from "drizzle-orm/node-postgres";
+import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import dotenv from "dotenv";
 import { ${tableName}, type New${className} } from "@/db/schema";
@@ -161,237 +141,50 @@ async function seed() {
   });
 
   const db = drizzle(pool);
-
-  const sampleData: New${className}[] = ${sampleDataGenerator};
-
-  try {
-    console.log('🌱 Seeding ${tableName} with sample data...');
-
-    await pool.query('SELECT 1');
-    console.log('✅ Database connection successful');
-
-    const insertedRecords = await db.insert(${tableName}).values(sampleData).returning();
-
-    console.log(\`✅ Successfully seeded \${insertedRecords.length} records to ${tableName}\`);
-    console.log('Sample records:', insertedRecords.slice(0, 3));
-
-  } catch (error) {
-    console.error('❌ Error seeding ${tableName}:', error);
-
-    if (error.code === 'ECONNREFUSED') {
-      console.log('💡 Database connection failed. Please check:');
-      console.log('  - Your DATABASE_URL in .env file');
-      console.log('  - Database server is running');
-      console.log('  - Network connectivity');
-    }
-
-    process.exit(1);
-  } finally {
-    await pool.end();
-  }
+  // ... rest of implementation
 }
+\`\`\`
 
-seed().catch(console.error);
-`;
-  }
+Generate a complete, executable TypeScript seed file with:
+- Proper imports matching the schema
+- Database connection with SSL handling
+- Sample data array with realistic values
+- Insert operation with error handling
+- Connection cleanup
+- Detailed logging
 
-  private generateSampleDataForSchemaFallback(
-    schemaDef: SchemaDefinition
-  ): string {
-    const { fields } = schemaDef;
-    const sampleCount = 12;
-    const samples: any[] = [];
+IMPORTANT: Generate ONLY the TypeScript code, no explanation or markdown formatting. Do not include any comments in the code. Ensure the generated code exactly matches the provided schema definition.`;
 
-    for (let i = 0; i < sampleCount; i++) {
-      const record: any = {};
+    try {
+      const result = await this.model.generateContent(seedPrompt);
+      let generatedCode = result.response.text().trim();
 
-      fields.forEach((field) => {
-        if (["id", "created_at", "updated_at"].includes(field.name)) {
-          return;
-        }
+      // Clean up any markdown formatting or comments
+      generatedCode = generatedCode
+        .replace(/```typescript\n?/g, "")
+        .replace(/```\n?/g, "")
+        .replace(/\/\/[^\n]*\n/g, "")
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .trim();
 
-        switch (field.type) {
-          case "text":
-            record[field.name] = this.generateSampleText(field.name, i);
-            break;
-          case "integer":
-            record[field.name] = this.generateSampleInteger(field.name, i);
-            break;
-          case "boolean":
-            record[field.name] = Math.random() > 0.5;
-            break;
-          case "uuid":
-            record[field.name] = `${Math.random()
-              .toString(36)
-              .substr(2, 8)}-${Math.random()
-              .toString(36)
-              .substr(2, 4)}-${Math.random()
-              .toString(36)
-              .substr(2, 4)}-${Math.random()
-              .toString(36)
-              .substr(2, 4)}-${Math.random().toString(36).substr(2, 12)}`;
-            break;
-          case "timestamp":
-            if (
-              field.name.includes("played_at") ||
-              field.name.includes("timestamp")
-            ) {
-              record[field.name] = new Date(
-                Date.now() - Math.random() * 7 * 24 * 60 * 60 * 1000
-              );
-            }
-            break;
-        }
-      });
+      // Validate that the generated code includes the required imports
+      if (!generatedCode.includes(`import { ${tableName}`)) {
+        console.log(
+          chalk.yellow(
+            `⚠️  Generated code may have incorrect imports. Attempting to fix...`
+          )
+        );
+        // Try to fix common import issues
+        generatedCode = generatedCode.replace(
+          /import\s*{[^}]+}\s*from\s*["']@\/db\/schema["']/,
+          `import { ${tableName}, type New${className} } from "@/db/schema"`
+        );
+      }
 
-      samples.push(record);
+      return generatedCode;
+    } catch (error) {
+      console.log(chalk.red(`❌ Error generating AI seed content: ${error}`));
+      throw new Error(`Failed to generate seed content using AI: ${error}`);
     }
-
-    return JSON.stringify(samples, null, 2);
-  }
-
-  private generateSampleText(fieldName: string, index: number): string {
-    const samples = {
-      song_title: [
-        "Blinding Lights",
-        "Watermelon Sugar",
-        "Levitating",
-        "Good 4 U",
-        "Stay",
-        "Industry Baby",
-        "Heat Waves",
-        "Peaches",
-        "Save Your Tears",
-        "Drivers License",
-        "Positions",
-        "Mood",
-      ],
-      track_title: [
-        "Blinding Lights",
-        "Watermelon Sugar",
-        "Levitating",
-        "Good 4 U",
-        "Stay",
-        "Industry Baby",
-        "Heat Waves",
-        "Peaches",
-        "Save Your Tears",
-        "Drivers License",
-        "Positions",
-        "Mood",
-      ],
-      title: [
-        "Blinding Lights",
-        "Watermelon Sugar",
-        "Levitating",
-        "Good 4 U",
-        "Stay",
-        "Industry Baby",
-        "Heat Waves",
-        "Peaches",
-        "Save Your Tears",
-        "Drivers License",
-        "Positions",
-        "Mood",
-      ],
-      artist_name: [
-        "The Weeknd",
-        "Harry Styles",
-        "Dua Lipa",
-        "Olivia Rodrigo",
-        "The Kid LAROI",
-        "Lil Nas X",
-        "Glass Animals",
-        "Justin Bieber",
-        "Ariana Grande",
-        "BTS",
-        "Taylor Swift",
-        "Drake",
-      ],
-      artist: [
-        "The Weeknd",
-        "Harry Styles",
-        "Dua Lipa",
-        "Olivia Rodrigo",
-        "The Kid LAROI",
-        "Lil Nas X",
-        "Glass Animals",
-        "Justin Bieber",
-        "Ariana Grande",
-        "BTS",
-        "Taylor Swift",
-        "Drake",
-      ],
-      album_name: [
-        "After Hours",
-        "Fine Line",
-        "Future Nostalgia",
-        "SOUR",
-        "F*CK LOVE 3",
-        "MONTERO",
-        "Dreamland",
-        "Justice",
-        "Positions",
-        "BE",
-        "evermore",
-        "Certified Lover Boy",
-      ],
-      album: [
-        "After Hours",
-        "Fine Line",
-        "Future Nostalgia",
-        "SOUR",
-        "F*CK LOVE 3",
-        "MONTERO",
-        "Dreamland",
-        "Justice",
-        "Positions",
-        "BE",
-        "evermore",
-        "Certified Lover Boy",
-      ],
-      genre: [
-        "Pop",
-        "Rock",
-        "Hip Hop",
-        "R&B",
-        "Electronic",
-        "Indie",
-        "Country",
-        "Jazz",
-        "Classical",
-        "Alternative",
-        "Reggae",
-        "Blues",
-      ],
-      name: [`Sample Name ${index + 1}`, `Test Item ${index + 1}`],
-      description: [
-        `Sample description for item ${index + 1}`,
-        `Test description ${index + 1}`,
-      ],
-      email: [`user${index + 1}@example.com`, `test${index + 1}@domain.com`],
-      status: ["active", "inactive", "pending", "completed"],
-      category: ["music", "entertainment", "lifestyle", "technology"],
-    };
-
-    if (samples[fieldName as keyof typeof samples]) {
-      const options = samples[fieldName as keyof typeof samples];
-      return options[index % options.length];
-    }
-
-    return `sample_${fieldName}_${index + 1}`;
-  }
-
-  private generateSampleInteger(fieldName: string, index: number): number {
-    if (fieldName.includes("duration")) {
-      return Math.floor(Math.random() * 180) + 120;
-    }
-    if (fieldName.includes("count") || fieldName.includes("plays")) {
-      return Math.floor(Math.random() * 10000) + 1;
-    }
-    if (fieldName.includes("year")) {
-      return 2020 + (index % 4);
-    }
-    return Math.floor(Math.random() * 100) + 1;
   }
 }
