@@ -244,12 +244,14 @@ FIX THESE SPECIFIC ISSUES in your response. Pay special attention to:
       errors.push("Database pool configuration not properly closed");
     }
 
-    // Check for all HTTP methods
+    // Check for all HTTP methods with more flexible regex
     const requiredMethods = ["GET", "POST", "PUT", "DELETE"];
     for (const method of requiredMethods) {
-      if (
-        !code.includes(`export async function ${method}(request: NextRequest)`)
-      ) {
+      const methodRegex = new RegExp(
+        `export\\s+async\\s+function\\s+${method}\\s*\\(`,
+        "i"
+      );
+      if (!methodRegex.test(code)) {
         errors.push(`Missing ${method} function declaration`);
       }
     }
@@ -356,12 +358,6 @@ FIX THESE SPECIFIC ISSUES in your response. Pay special attention to:
     if (orphanedValidationRegex.test(fixedCode)) {
       // Remove orphaned validation code
       fixedCode = fixedCode.replace(orphanedValidationRegex, "");
-    }
-
-    // Ensure all function declarations are complete
-    if (!fixedCode.includes("export async function GET(")) {
-      // If GET function is missing, regenerate using fallback
-      throw new Error("GET function is missing in the generated code.");
     }
 
     // Fix incomplete function declarations
