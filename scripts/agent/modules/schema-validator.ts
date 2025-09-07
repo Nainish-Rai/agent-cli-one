@@ -29,6 +29,7 @@ export class SchemaValidator {
           `Field ${i + 1}: Name must be snake_case and start with a letter`
         );
 
+      // Updated type validation to include varchar with length specifications
       const validTypes = [
         "serial",
         "text",
@@ -37,7 +38,12 @@ export class SchemaValidator {
         "boolean",
         "uuid",
       ];
-      if (!validTypes.includes(f.type))
+
+      // Check if it's a basic valid type or a varchar with length specification
+      const isValidType =
+        validTypes.includes(f.type) || /^varchar\(\d+\)$/.test(f.type);
+
+      if (!isValidType)
         errors.push(`Field '${f.name}': Invalid type '${f.type}'.`);
 
       if (f.constraints) {

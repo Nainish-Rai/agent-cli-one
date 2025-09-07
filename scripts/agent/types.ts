@@ -15,7 +15,14 @@ export interface AgentStep {
 
 export interface SchemaField {
   name: string;
-  type: "serial" | "text" | "timestamp" | "integer" | "boolean" | "uuid";
+  type:
+    | "serial"
+    | "text"
+    | "timestamp"
+    | "integer"
+    | "boolean"
+    | "uuid"
+    | string;
   constraints?: string[];
 }
 

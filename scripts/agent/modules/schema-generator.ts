@@ -204,25 +204,30 @@ Generate ONLY the TypeScript code, no explanation or markdown formatting. Do not
   private generateBasicSchemaContent(schemaDef: SchemaDefinition): string {
     const imports = new Set(["pgTable"]);
     schemaDef.fields.forEach((f) => {
-      switch (f.type) {
-        case "serial":
-          imports.add("serial");
-          break;
-        case "text":
-          imports.add("text");
-          break;
-        case "timestamp":
-          imports.add("timestamp");
-          break;
-        case "integer":
-          imports.add("integer");
-          break;
-        case "boolean":
-          imports.add("boolean");
-          break;
-        case "uuid":
-          imports.add("uuid");
-          break;
+      // Handle varchar types with length specifications
+      if (f.type.startsWith("varchar(")) {
+        imports.add("varchar");
+      } else {
+        switch (f.type) {
+          case "serial":
+            imports.add("serial");
+            break;
+          case "text":
+            imports.add("text");
+            break;
+          case "timestamp":
+            imports.add("timestamp");
+            break;
+          case "integer":
+            imports.add("integer");
+            break;
+          case "boolean":
+            imports.add("boolean");
+            break;
+          case "uuid":
+            imports.add("uuid");
+            break;
+        }
       }
     });
 
@@ -231,7 +236,16 @@ Generate ONLY the TypeScript code, no explanation or markdown formatting. Do not
     )} } from "drizzle-orm/pg-core";`;
     const fields = schemaDef.fields
       .map((f) => {
-        let def = `${f.type}("${f.name}")`;
+        let def;
+        // Handle varchar types with length specifications
+        if (f.type.startsWith("varchar(")) {
+          const lengthMatch = f.type.match(/varchar\((\d+)\)/);
+          const length = lengthMatch ? lengthMatch[1] : "255";
+          def = `varchar("${f.name}", { length: ${length} })`;
+        } else {
+          def = `${f.type}("${f.name}")`;
+        }
+
         if (f.constraints?.length) {
           const valid = f.constraints.filter(
             (c) =>
