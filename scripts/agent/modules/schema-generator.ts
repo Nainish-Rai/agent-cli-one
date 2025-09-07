@@ -7,50 +7,6 @@ export class SchemaGenerator {
     query: string,
     model: any
   ): Promise<SchemaDefinition[]> {
-    if (!model) {
-      if (
-        query.toLowerCase().includes("recently played") &&
-        query.toLowerCase().includes("songs")
-      ) {
-        return [
-          {
-            tableName: "recently_played",
-            fileName: "recently-played.ts",
-            fields: [
-              { name: "id", type: "serial", constraints: ["primaryKey()"] },
-              { name: "user_id", type: "text", constraints: ["notNull()"] },
-              { name: "song_id", type: "text", constraints: ["notNull()"] },
-              { name: "song_title", type: "text", constraints: ["notNull()"] },
-              { name: "artist", type: "text", constraints: ["notNull()"] },
-              { name: "album", type: "text" },
-              { name: "duration_seconds", type: "integer" },
-              {
-                name: "played_at",
-                type: "timestamp",
-                constraints: ["defaultNow()", "notNull()"],
-              },
-              {
-                name: "created_at",
-                type: "timestamp",
-                constraints: ["defaultNow()", "notNull()"],
-              },
-              {
-                name: "updated_at",
-                type: "timestamp",
-                constraints: ["defaultNow()", "notNull()"],
-              },
-            ],
-          },
-        ];
-      }
-      console.log(
-        chalk.red(
-          "❌ GEMINI_API_KEY is required for advanced schema generation"
-        )
-      );
-      return [];
-    }
-
     try {
       const schemaPrompt = `You are a database schema expert for PostgreSQL with Drizzle ORM. Analyze the user query and generate VALID schema definitions.\nUser Query: "${query}"\nReturn ONLY a JSON array.`;
       const result = await model.generateContent(schemaPrompt);
