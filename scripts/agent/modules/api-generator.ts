@@ -70,7 +70,7 @@ Table Information:
 - Fields: ${JSON.stringify(fieldsInfo, null, 2)}
 
 Requirements:
-1. Use Next.js 13+ App Router (NextRequest, NextResponse)
+1. Use Next.js 14+ App Router (NextRequest, NextResponse)
 2. Use Drizzle ORM with PostgreSQL
 3. Import types from "@/db/schema"
 4. Implement GET, POST, PUT, DELETE methods
@@ -79,6 +79,7 @@ Requirements:
 7. Include proper error handling and validation
 8. Use proper TypeScript types
 9. Return consistent JSON responses with success/error format
+10. NO COMMENTS in the generated code
 
 Database setup:
 \`\`\`typescript
@@ -94,18 +95,19 @@ Response format:
 // Error: { success: false, error: string }
 \`\`\`
 
-Generate the complete API route file with all imports and exports. Use modern TypeScript and follow Next.js best practices.
+Generate the complete API route file with all imports and exports. Use modern TypeScript and follow Next.js 14+ best practices.
 
-Generate ONLY the TypeScript code, no explanation or markdown formatting.`;
+Generate ONLY the TypeScript code, no explanation or markdown formatting. Do not include any comments in the code.`;
 
     try {
       const result = await this.model.generateContent(apiPrompt);
       let generatedCode = result.response.text().trim();
 
-      // Clean up any markdown formatting that might have been included
       generatedCode = generatedCode
         .replace(/```typescript\n?/g, "")
-        .replace(/```\n?/g, "");
+        .replace(/```\n?/g, "")
+        .replace(/\/\/[^\n]*\n/g, "")
+        .replace(/\/\*[\s\S]*?\*\//g, "");
 
       return generatedCode;
     } catch (error) {
@@ -126,7 +128,8 @@ import { ${tableName}, type ${className}, type New${className} } from "@/db/sche
 import { desc, eq, and, count } from "drizzle-orm";
 
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL || "postgresql://localhost:5432/spotify_clone"
+  connectionString: process.env.DATABASE_URL || "postgresql://localhost:5432/spotify_clone",
+  ssl: process.env.DATABASE_URL?.includes('neon.tech') ? { rejectUnauthorized: false } : false
 });
 const db = drizzle(pool);
 
@@ -162,13 +165,9 @@ export async function GET(request: NextRequest) {
     let countQuery = db.select({ count: count() }).from(${tableName});
 
     const whereConditions = [];
-    ${
-      hasUserId
-        ? `
+
     if (userId) {
       whereConditions.push(eq(${tableName}.user_id, userId));
-    }`
-        : ""
     }
 
     if (whereConditions.length > 0) {

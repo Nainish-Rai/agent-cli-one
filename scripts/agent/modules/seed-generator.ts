@@ -83,6 +83,9 @@ Requirements:
 5. Handle errors appropriately
 6. Generate contextually appropriate data based on field names
 7. Don't include id, created_at, updated_at in sample data (auto-generated)
+8. Use async/await properly
+9. Handle SSL connections for cloud databases
+10. NO COMMENTS in the generated code
 
 Common field patterns and appropriate data:
 - song_title, track_title, title: Real song titles
@@ -96,7 +99,8 @@ Common field patterns and appropriate data:
 Database setup:
 \`\`\`typescript
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL || 'postgresql://localhost:5432/spotify_clone'
+  connectionString: process.env.DATABASE_URL || 'postgresql://localhost:5432/spotify_clone',
+  ssl: process.env.DATABASE_URL?.includes('neon.tech') ? { rejectUnauthorized: false } : false
 });
 const db = drizzle(pool);
 \`\`\`
@@ -110,18 +114,19 @@ Generate a complete TypeScript seed file with:
 - Cleanup
 
 Note: Import schema from "@/db/schema";
-exampple: " import { dislikedSongs } from "@/db/schema"; "
+Example: " import { dislikedSongs } from "@/db/schema"; "
 
-Generate ONLY the TypeScript code, no explanation or markdown formatting.`;
+Generate ONLY the TypeScript code, no explanation or markdown formatting. Do not include any comments in the code.`;
 
     try {
       const result = await this.model.generateContent(seedPrompt);
       let generatedCode = result.response.text().trim();
 
-      // Clean up any markdown formatting
       generatedCode = generatedCode
         .replace(/```typescript\n?/g, "")
-        .replace(/```\n?/g, "");
+        .replace(/```\n?/g, "")
+        .replace(/\/\/[^\n]*\n/g, "")
+        .replace(/\/\*[\s\S]*?\*\//g, "");
 
       return generatedCode;
     } catch (error) {
@@ -139,15 +144,11 @@ Generate ONLY the TypeScript code, no explanation or markdown formatting.`;
     return `import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import dotenv from "dotenv";
-import { ${tableName}, type New${className} } from "../src/db/schema/${schemaDef.fileName.replace(
-      ".ts",
-      ""
-    )}";
+import { ${tableName}, type New${className} } from "@/db/schema";
 
 dotenv.config();
 
 async function seed() {
-  // Check if DATABASE_URL is available
   if (!process.env.DATABASE_URL) {
     console.error('❌ DATABASE_URL environment variable is not set');
     console.log('Please ensure your .env file contains a valid DATABASE_URL');
@@ -166,7 +167,6 @@ async function seed() {
   try {
     console.log('🌱 Seeding ${tableName} with sample data...');
 
-    // Test database connection first
     await pool.query('SELECT 1');
     console.log('✅ Database connection successful');
 
@@ -199,7 +199,7 @@ seed().catch(console.error);
     schemaDef: SchemaDefinition
   ): string {
     const { fields } = schemaDef;
-    const sampleCount = 5;
+    const sampleCount = 12;
     const samples: any[] = [];
 
     for (let i = 0; i < sampleCount; i++) {
@@ -252,38 +252,119 @@ seed().catch(console.error);
 
   private generateSampleText(fieldName: string, index: number): string {
     const samples = {
-      user_id: [
-        `user_${index + 1}`,
-        `spotify_user_${index + 1}`,
-        `test_user_${index + 1}`,
-      ],
-      song_id: [
-        `song_${index + 1}`,
-        `track_${Math.random().toString(36).substr(2, 8)}`,
-      ],
       song_title: [
-        "Bohemian Rhapsody",
-        "Hotel California",
-        "Stairway to Heaven",
-        "Imagine",
-        "Sweet Child O Mine",
+        "Blinding Lights",
+        "Watermelon Sugar",
+        "Levitating",
+        "Good 4 U",
+        "Stay",
+        "Industry Baby",
+        "Heat Waves",
+        "Peaches",
+        "Save Your Tears",
+        "Drivers License",
+        "Positions",
+        "Mood",
+      ],
+      track_title: [
+        "Blinding Lights",
+        "Watermelon Sugar",
+        "Levitating",
+        "Good 4 U",
+        "Stay",
+        "Industry Baby",
+        "Heat Waves",
+        "Peaches",
+        "Save Your Tears",
+        "Drivers License",
+        "Positions",
+        "Mood",
+      ],
+      title: [
+        "Blinding Lights",
+        "Watermelon Sugar",
+        "Levitating",
+        "Good 4 U",
+        "Stay",
+        "Industry Baby",
+        "Heat Waves",
+        "Peaches",
+        "Save Your Tears",
+        "Drivers License",
+        "Positions",
+        "Mood",
+      ],
+      artist_name: [
+        "The Weeknd",
+        "Harry Styles",
+        "Dua Lipa",
+        "Olivia Rodrigo",
+        "The Kid LAROI",
+        "Lil Nas X",
+        "Glass Animals",
+        "Justin Bieber",
+        "Ariana Grande",
+        "BTS",
+        "Taylor Swift",
+        "Drake",
       ],
       artist: [
-        "Queen",
-        "Eagles",
-        "Led Zeppelin",
-        "John Lennon",
-        "Guns N' Roses",
+        "The Weeknd",
+        "Harry Styles",
+        "Dua Lipa",
+        "Olivia Rodrigo",
+        "The Kid LAROI",
+        "Lil Nas X",
+        "Glass Animals",
+        "Justin Bieber",
+        "Ariana Grande",
+        "BTS",
+        "Taylor Swift",
+        "Drake",
+      ],
+      album_name: [
+        "After Hours",
+        "Fine Line",
+        "Future Nostalgia",
+        "SOUR",
+        "F*CK LOVE 3",
+        "MONTERO",
+        "Dreamland",
+        "Justice",
+        "Positions",
+        "BE",
+        "evermore",
+        "Certified Lover Boy",
       ],
       album: [
-        "A Night at the Opera",
-        "Hotel California",
-        "Led Zeppelin IV",
-        "Imagine",
-        "Appetite for Destruction",
+        "After Hours",
+        "Fine Line",
+        "Future Nostalgia",
+        "SOUR",
+        "F*CK LOVE 3",
+        "MONTERO",
+        "Dreamland",
+        "Justice",
+        "Positions",
+        "BE",
+        "evermore",
+        "Certified Lover Boy",
+      ],
+      genre: [
+        "Pop",
+        "Rock",
+        "Hip Hop",
+        "R&B",
+        "Electronic",
+        "Indie",
+        "Country",
+        "Jazz",
+        "Classical",
+        "Alternative",
+        "Reggae",
+        "Blues",
       ],
       name: [`Sample Name ${index + 1}`, `Test Item ${index + 1}`],
-      title: [`Sample Title ${index + 1}`, `Test Title ${index + 1}`],
       description: [
         `Sample description for item ${index + 1}`,
         `Test description ${index + 1}`,
@@ -302,19 +383,15 @@ seed().catch(console.error);
   }
 
   private generateSampleInteger(fieldName: string, index: number): number {
-    const ranges = {
-      duration_seconds: () => Math.floor(Math.random() * 300) + 60,
-      play_count: () => Math.floor(Math.random() * 1000),
-      rating: () => Math.floor(Math.random() * 5) + 1,
-      age: () => Math.floor(Math.random() * 50) + 18,
-      price: () => Math.floor(Math.random() * 10000) + 100,
-      quantity: () => Math.floor(Math.random() * 100) + 1,
-    };
-
-    if (ranges[fieldName as keyof typeof ranges]) {
-      return ranges[fieldName as keyof typeof ranges]();
+    if (fieldName.includes("duration")) {
+      return Math.floor(Math.random() * 180) + 120;
     }
-
+    if (fieldName.includes("count") || fieldName.includes("plays")) {
+      return Math.floor(Math.random() * 10000) + 1;
+    }
+    if (fieldName.includes("year")) {
+      return 2020 + (index % 4);
+    }
     return Math.floor(Math.random() * 100) + 1;
   }
 }

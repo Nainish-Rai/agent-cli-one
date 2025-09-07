@@ -132,23 +132,26 @@ Table Information:
 - Fields: ${JSON.stringify(fieldsInfo, null, 2)}
 
 Requirements:
-1. Use modern React hooks (useState, useCallback, useEffect)
-2. Include proper TypeScript types
-3. Import types from '@/db/schema'
-4. Implement CRUD operations (create, read, update, delete)
-5. Support pagination (limit, offset, total, hasMore)
-6. Support filtering by user_id if applicable
-7. Include loading states and error handling
-8. Use fetch API with proper error handling
-9. Return consistent data structure
+1. Use React 18+ with modern hooks (useState, useCallback, useEffect)
+2. TypeScript with proper type definitions
+3. State management for records, loading, error, pagination
+4. CRUD operations: fetchAll, fetchById, create, update, delete
+5. Error handling and loading states
+6. Pagination support
+7. User filtering if user_id field exists
+8. Return interface with data and actions
+9. Use fetch API with proper error handling
+10. NO COMMENTS in the generated code
 
 Hook interface should include:
-- data: { records: T[], loading: boolean, error: string | null, pagination: {...} }
+- data: array of records with pagination info
+- loading: boolean
+- error: string | null
 - fetchAll: (params?) => Promise<void>
-- fetchById: (id: number) => Promise<T | null>
-- create: (data: NewT) => Promise<T | null>
-- update: (id: number, data: Partial<NewT>) => Promise<T | null>
-- delete: (id: number) => Promise<boolean>
+- fetchById: (id) => Promise<T | null>
+- create: (data) => Promise<T | null>
+- update: (id, data) => Promise<T | null>
+- delete: (id) => Promise<boolean>
 - clearError: () => void
 
 API Response format:
@@ -159,16 +162,17 @@ API Response format:
 
 Generate a complete, production-ready React hook with modern TypeScript patterns.
 
-Generate ONLY the TypeScript code, no explanation or markdown formatting.`;
+Generate ONLY the TypeScript code, no explanation or markdown formatting. Do not include any comments in the code.`;
 
     try {
       const result = await this.model.generateContent(hookPrompt);
       let generatedCode = result.response.text().trim();
 
-      // Clean up any markdown formatting
       generatedCode = generatedCode
         .replace(/```typescript\n?/g, "")
-        .replace(/```\n?/g, "");
+        .replace(/```\n?/g, "")
+        .replace(/\/\/[^\n]*\n/g, "")
+        .replace(/\/\*[\s\S]*?\*\//g, "");
 
       return generatedCode;
     } catch (error) {
@@ -202,7 +206,7 @@ interface ${className}Actions {
   fetchAll: (params?: { limit?: number; offset?: number; user_id?: string }) => Promise<void>;
   fetchById: (id: number) => Promise<${className} | null>;
   create: (data: New${className}) => Promise<${className} | null>;
-  update: (id: number, data: Partial<New${className}>): Promise<${className} | null>;
+  update: (id: number, data: Partial<New${className}>) => Promise<${className} | null>;
   delete: (id: number) => Promise<boolean>;
   clearError: () => void;
 }
@@ -215,21 +219,12 @@ export function ${hookName}() {
     pagination: null,
   });
 
-  const setLoading = (loading: boolean) => {
-    setState(prev => ({ ...prev, loading }));
-  };
-
-  const setError = (error: string | null) => {
-    setState(prev => ({ ...prev, error }));
-  };
-
   const clearError = useCallback(() => {
-    setError(null);
+    setState(prev => ({ ...prev, error: null }));
   }, []);
 
   const fetchAll = useCallback(async (params?: { limit?: number; offset?: number; user_id?: string }) => {
-    setLoading(true);
-    setError(null);
+    setState(prev => ({ ...prev, loading: true, error: null }));
 
     try {
       const searchParams = new URLSearchParams();
@@ -251,14 +246,16 @@ export function ${hookName}() {
         loading: false,
       }));
     } catch (error) {
-      setError(error instanceof Error ? error.message : 'Unknown error');
-      setLoading(false);
+      setState(prev => ({
+        ...prev,
+        error: error instanceof Error ? error.message : 'Unknown error',
+        loading: false,
+      }));
     }
   }, []);
 
   const fetchById = useCallback(async (id: number): Promise<${className} | null> => {
-    setLoading(true);
-    setError(null);
+    setState(prev => ({ ...prev, loading: true, error: null }));
 
     try {
       const response = await fetch(\`${apiEndpoint}?id=\${id}\`);
@@ -268,18 +265,20 @@ export function ${hookName}() {
         throw new Error(result.error || 'Failed to fetch ${tableName}');
       }
 
-      setLoading(false);
+      setState(prev => ({ ...prev, loading: false }));
       return result.data;
     } catch (error) {
-      setError(error instanceof Error ? error.message : 'Unknown error');
-      setLoading(false);
+      setState(prev => ({
+        ...prev,
+        error: error instanceof Error ? error.message : 'Unknown error',
+        loading: false,
+      }));
       return null;
     }
   }, []);
 
   const create = useCallback(async (data: New${className}): Promise<${className} | null> => {
-    setLoading(true);
-    setError(null);
+    setState(prev => ({ ...prev, loading: true, error: null }));
 
     try {
       const response = await fetch('${apiEndpoint}', {
@@ -304,15 +303,17 @@ export function ${hookName}() {
 
       return result.data;
     } catch (error) {
-      setError(error instanceof Error ? error.message : 'Unknown error');
-      setLoading(false);
+      setState(prev => ({
+        ...prev,
+        error: error instanceof Error ? error.message : 'Unknown error',
+        loading: false,
+      }));
       return null;
     }
   }, []);
 
   const update = useCallback(async (id: number, data: Partial<New${className}>): Promise<${className} | null> => {
-    setLoading(true);
-    setError(null);
+    setState(prev => ({ ...prev, loading: true, error: null }));
 
     try {
       const response = await fetch(\`${apiEndpoint}?id=\${id}\`, {
@@ -339,15 +340,17 @@ export function ${hookName}() {
 
       return result.data;
     } catch (error) {
-      setError(error instanceof Error ? error.message : 'Unknown error');
-      setLoading(false);
+      setState(prev => ({
+        ...prev,
+        error: error instanceof Error ? error.message : 'Unknown error',
+        loading: false,
+      }));
       return null;
     }
   }, []);
 
   const deleteRecord = useCallback(async (id: number): Promise<boolean> => {
-    setLoading(true);
-    setError(null);
+    setState(prev => ({ ...prev, loading: true, error: null }));
 
     try {
       const response = await fetch(\`${apiEndpoint}?id=\${id}\`, {
@@ -368,8 +371,11 @@ export function ${hookName}() {
 
       return true;
     } catch (error) {
-      setError(error instanceof Error ? error.message : 'Unknown error');
-      setLoading(false);
+      setState(prev => ({
+        ...prev,
+        error: error instanceof Error ? error.message : 'Unknown error',
+        loading: false,
+      }));
       return false;
     }
   }, []);
@@ -436,7 +442,6 @@ export function ${hookName}() {
       }>,
     };
 
-    // Map query keywords to UI sections
     const uiMappings = [
       {
         keywords: ["recently played", "recent", "history", "last played"],
@@ -475,7 +480,6 @@ export function ${hookName}() {
       },
     ];
 
-    // Check each schema against the query and UI mappings
     for (const schema of schemaDefinitions) {
       const tableName = schema.tableName.toLowerCase();
       const schemaKeywords = tableName.split("_").concat(tableName.split("-"));
@@ -517,7 +521,6 @@ export function ${hookName}() {
       }
     }
 
-    // If no specific mapping found, try to infer from table structure
     if (analysis.sections.length === 0) {
       for (const schema of schemaDefinitions) {
         const hookName = `use${toPascalCase(schema.tableName)}`;
@@ -556,7 +559,6 @@ export function ${hookName}() {
     schemaDefinitions: SchemaDefinition[],
     queryAnalysis: any
   ) {
-    // Delegate to UIIntegrator for complex component updates
     const uiIntegrator = new (await import("./ui-integrator")).UIIntegrator();
     uiIntegrator.setModel(this.model);
     await uiIntegrator.updateSpotifyMainContent(
@@ -569,7 +571,6 @@ export function ${hookName}() {
     schemaDefinitions: SchemaDefinition[],
     queryAnalysis: any
   ) {
-    // Delegate to UIIntegrator for complex component updates
     const uiIntegrator = new (await import("./ui-integrator")).UIIntegrator();
     uiIntegrator.setModel(this.model);
     await uiIntegrator.updateSpotifySidebar(schemaDefinitions, queryAnalysis);

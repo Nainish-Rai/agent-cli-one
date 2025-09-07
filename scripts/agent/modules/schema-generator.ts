@@ -122,6 +122,7 @@ Requirements:
 3. Export the table and TypeScript types
 4. Use proper Drizzle ORM syntax
 5. Include inferSelect and inferInsert types
+6. NO COMMENTS in the generated code
 
 Example structure:
 \`\`\`typescript
@@ -138,14 +139,21 @@ export type TableName = typeof tableName.$inferSelect;
 export type NewTableName = typeof tableName.$inferInsert;
 \`\`\`
 
-Generate ONLY the TypeScript code, no explanation or markdown formatting.`;
+Generate ONLY the TypeScript code, no explanation or markdown formatting. Do not include any comments in the code.`;
 
     try {
       const result = await this.model.generateContent(schemaPrompt);
-      return result.response.text().trim();
+      let generatedCode = result.response.text().trim();
+
+      generatedCode = generatedCode
+        .replace(/```typescript\n?/g, "")
+        .replace(/```\n?/g, "")
+        .replace(/\/\/[^\n]*\n/g, "")
+        .replace(/\/\*[\s\S]*?\*\//g, "");
+
+      return generatedCode;
     } catch (error) {
       console.log(chalk.red(`❌ Error generating schema content: ${error}`));
-      // Fallback to basic template
       return this.generateBasicSchemaContent(schemaDef);
     }
   }
@@ -163,6 +171,7 @@ Requirements:
 1. Export everything from each schema file
 2. Use proper ES6 export syntax
 3. Remove .ts extension from imports
+4. NO COMMENTS in the generated code
 
 Example:
 \`\`\`typescript
@@ -170,14 +179,21 @@ export * from "./schema1";
 export * from "./schema2";
 \`\`\`
 
-Generate ONLY the TypeScript code, no explanation or markdown formatting.`;
+Generate ONLY the TypeScript code, no explanation or markdown formatting. Do not include any comments in the code.`;
 
     try {
       const result = await this.model.generateContent(indexPrompt);
-      return result.response.text().trim();
+      let generatedCode = result.response.text().trim();
+
+      generatedCode = generatedCode
+        .replace(/```typescript\n?/g, "")
+        .replace(/```\n?/g, "")
+        .replace(/\/\/[^\n]*\n/g, "")
+        .replace(/\/\*[\s\S]*?\*\//g, "");
+
+      return generatedCode;
     } catch (error) {
       console.log(chalk.red(`❌ Error generating index content: ${error}`));
-      // Fallback
       return schemaFiles
         .map((f) => `export * from "./${f.replace(".ts", "")}";`)
         .join("\n");
