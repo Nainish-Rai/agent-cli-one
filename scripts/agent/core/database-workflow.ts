@@ -11,7 +11,9 @@ export class DatabaseWorkflow extends BaseAgent {
       type: "creating",
       message: `Creating ${schemaDef.tableName} schema definition`,
     });
-    const schemaContent = schemaGenerator.generateSchemaContent(schemaDef);
+    const schemaContent = await schemaGenerator.generateSchemaContent(
+      schemaDef
+    );
     const schemaPath = path.join(
       process.cwd(),
       "src",
