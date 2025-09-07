@@ -6,8 +6,29 @@ import { SchemaDefinition } from "../types";
 import { toPascalCase } from "../utils";
 
 export class ApiGenerator {
+  private model: any;
+
+  constructor(model?: any) {
+    this.model = model;
+  }
+
+  setModel(model: any) {
+    this.model = model;
+  }
+
   async generateApiRoute(schemaDef: SchemaDefinition) {
-    const apiContent = this.generateApiRouteContent(schemaDef);
+    if (!this.model) {
+      console.log(chalk.yellow("⚠️  No model set, using fallback template"));
+      const apiContent = this.generateApiRouteContentFallback(schemaDef);
+      await this.writeApiRoute(schemaDef, apiContent);
+      return;
+    }
+
+    const apiContent = await this.generateApiRouteContent(schemaDef);
+    await this.writeApiRoute(schemaDef, apiContent);
+  }
+
+  private async writeApiRoute(schemaDef: SchemaDefinition, content: string) {
     const apiPath = path.join(
       process.cwd(),
       "src",
@@ -17,7 +38,7 @@ export class ApiGenerator {
       "route.ts"
     );
     fs.mkdirSync(path.dirname(apiPath), { recursive: true });
-    fs.writeFileSync(apiPath, apiContent);
+    fs.writeFileSync(apiPath, content);
     console.log(
       chalk.gray(
         `   📁 Created: api/${schemaDef.tableName.replace(/_/g, "-")}/route.ts`
@@ -25,7 +46,75 @@ export class ApiGenerator {
     );
   }
 
-  private generateApiRouteContent(schemaDef: SchemaDefinition): string {
+  private async generateApiRouteContent(
+    schemaDef: SchemaDefinition
+  ): Promise<string> {
+    const tableName = schemaDef.tableName;
+    const className = toPascalCase(tableName);
+    const hasUserId = schemaDef.fields.some((f) => f.name === "user_id");
+
+    const fieldsInfo = schemaDef.fields.map((f) => ({
+      name: f.name,
+      type: f.type,
+      isRequired:
+        f.constraints?.includes("notNull()") &&
+        !["id", "created_at", "updated_at"].includes(f.name),
+    }));
+
+    const apiPrompt = `Generate a complete Next.js API route file for a database table with full CRUD operations.
+
+Table Information:
+- Table name: ${tableName}
+- Class name: ${className}
+- Has user_id field: ${hasUserId}
+- Fields: ${JSON.stringify(fieldsInfo, null, 2)}
+
+Requirements:
+1. Use Next.js 13+ App Router (NextRequest, NextResponse)
+2. Use Drizzle ORM with PostgreSQL
+3. Import types from "@/db/schema"
+4. Implement GET, POST, PUT, DELETE methods
+5. Support pagination (limit, offset)
+6. Support filtering by id and user_id (if applicable)
+7. Include proper error handling and validation
+8. Use proper TypeScript types
+9. Return consistent JSON responses with success/error format
+
+Database setup:
+\`\`\`typescript
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL || "postgresql://localhost:5432/spotify_clone"
+});
+const db = drizzle(pool);
+\`\`\`
+
+Response format:
+\`\`\`typescript
+// Success: { success: true, data: T, pagination?: {...} }
+// Error: { success: false, error: string }
+\`\`\`
+
+Generate the complete API route file with all imports and exports. Use modern TypeScript and follow Next.js best practices.
+
+Generate ONLY the TypeScript code, no explanation or markdown formatting.`;
+
+    try {
+      const result = await this.model.generateContent(apiPrompt);
+      let generatedCode = result.response.text().trim();
+
+      // Clean up any markdown formatting that might have been included
+      generatedCode = generatedCode
+        .replace(/```typescript\n?/g, "")
+        .replace(/```\n?/g, "");
+
+      return generatedCode;
+    } catch (error) {
+      console.log(chalk.red(`❌ Error generating API route: ${error}`));
+      return this.generateApiRouteContentFallback(schemaDef);
+    }
+  }
+
+  private generateApiRouteContentFallback(schemaDef: SchemaDefinition): string {
     const tableName = schemaDef.tableName;
     const className = toPascalCase(tableName);
     const hasUserId = schemaDef.fields.some((f) => f.name === "user_id");

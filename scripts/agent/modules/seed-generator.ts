@@ -6,15 +6,36 @@ import { SchemaDefinition } from "../types";
 import { toPascalCase } from "../utils";
 
 export class SeedGenerator {
+  private model: any;
+
+  constructor(model?: any) {
+    this.model = model;
+  }
+
+  setModel(model: any) {
+    this.model = model;
+  }
+
   async generateSeedData(schemaDef: SchemaDefinition) {
-    const seedContent = this.generateSeedContent(schemaDef);
+    if (!this.model) {
+      console.log(chalk.yellow("⚠️  No model set, using fallback seed data"));
+      const seedContent = this.generateSeedContentFallback(schemaDef);
+      await this.writeSeedFile(schemaDef, seedContent);
+      return;
+    }
+
+    const seedContent = await this.generateSeedContent(schemaDef);
+    await this.writeSeedFile(schemaDef, seedContent);
+  }
+
+  private async writeSeedFile(schemaDef: SchemaDefinition, content: string) {
     const seedPath = path.join(
       process.cwd(),
       "scripts",
       `seed-${schemaDef.tableName}.ts`
     );
     fs.mkdirSync(path.dirname(seedPath), { recursive: true });
-    fs.writeFileSync(seedPath, seedContent);
+    fs.writeFileSync(seedPath, content);
     console.log(chalk.gray(`   📁 Created: seed-${schemaDef.tableName}.ts`));
 
     try {
@@ -30,10 +51,87 @@ export class SeedGenerator {
     }
   }
 
-  private generateSeedContent(schemaDef: SchemaDefinition): string {
+  private async generateSeedContent(
+    schemaDef: SchemaDefinition
+  ): Promise<string> {
     const tableName = schemaDef.tableName;
     const className = toPascalCase(tableName);
-    const sampleDataGenerator = this.generateSampleDataForSchema(schemaDef);
+
+    const fieldsInfo = schemaDef.fields
+      .filter((f) => !["id", "created_at", "updated_at"].includes(f.name))
+      .map((f) => ({
+        name: f.name,
+        type: f.type,
+        isRequired: f.constraints?.includes("notNull()"),
+      }));
+
+    const seedPrompt = `Generate a TypeScript seed file for a database table with realistic sample data.
+
+Table Information:
+- Table name: ${tableName}
+- Class name: ${className}
+- File name: ${schemaDef.fileName}
+- Fields to populate: ${JSON.stringify(fieldsInfo, null, 2)}
+
+Context: This is for a Spotify clone application, so generate music-related data if the table seems music-related.
+
+Requirements:
+1. Generate 10-15 realistic sample records
+2. Use proper TypeScript types
+3. Import from the correct schema file path
+4. Include proper database connection setup
+5. Handle errors appropriately
+6. Generate contextually appropriate data based on field names
+7. Don't include id, created_at, updated_at in sample data (auto-generated)
+
+Common field patterns and appropriate data:
+- song_title, track_title, title: Real song titles
+- artist_name, artist: Real artist names
+- album_name, album: Real album names
+- duration_seconds: Realistic song durations (120-300 seconds)
+- genre: Music genres
+- user_id: UUID format or user identifiers
+- recently_played, last_played: Recent timestamps
+
+Database setup:
+\`\`\`typescript
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL || 'postgresql://localhost:5432/spotify_clone'
+});
+const db = drizzle(pool);
+\`\`\`
+
+Generate a complete TypeScript seed file with:
+- Proper imports
+- Database connection
+- Sample data array
+- Insert operation
+- Error handling
+- Cleanup
+
+Generate ONLY the TypeScript code, no explanation or markdown formatting.`;
+
+    try {
+      const result = await this.model.generateContent(seedPrompt);
+      let generatedCode = result.response.text().trim();
+
+      // Clean up any markdown formatting
+      generatedCode = generatedCode
+        .replace(/```typescript\n?/g, "")
+        .replace(/```\n?/g, "");
+
+      return generatedCode;
+    } catch (error) {
+      console.log(chalk.red(`❌ Error generating seed content: ${error}`));
+      return this.generateSeedContentFallback(schemaDef);
+    }
+  }
+
+  private generateSeedContentFallback(schemaDef: SchemaDefinition): string {
+    const tableName = schemaDef.tableName;
+    const className = toPascalCase(tableName);
+    const sampleDataGenerator =
+      this.generateSampleDataForSchemaFallback(schemaDef);
 
     return `import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
@@ -73,7 +171,9 @@ seed().catch(console.error);
 `;
   }
 
-  private generateSampleDataForSchema(schemaDef: SchemaDefinition): string {
+  private generateSampleDataForSchemaFallback(
+    schemaDef: SchemaDefinition
+  ): string {
     const { fields } = schemaDef;
     const sampleCount = 5;
     const samples: any[] = [];

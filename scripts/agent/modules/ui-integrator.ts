@@ -5,6 +5,16 @@ import { SchemaDefinition } from "../types";
 import { toPascalCase } from "../utils";
 
 export class UIIntegrator {
+  private model: any;
+
+  constructor(model?: any) {
+    this.model = model;
+  }
+
+  setModel(model: any) {
+    this.model = model;
+  }
+
   analyzeQueryForUIIntegration(
     query: string,
     schemaDefinitions: SchemaDefinition[]
@@ -65,7 +75,6 @@ export class UIIntegrator {
       const tableName = schema.tableName.toLowerCase();
       const schemaKeywords = tableName.split("_").concat(tableName.split("-"));
 
-      // Find matching UI section
       const matchingMapping = uiMappings.find((mapping) => {
         const queryMatches = mapping.keywords.some((keyword) =>
           lowerQuery.includes(keyword)
@@ -108,7 +117,6 @@ export class UIIntegrator {
       for (const schema of schemaDefinitions) {
         const hookName = `use${toPascalCase(schema.tableName)}`;
 
-        // Check if table has music-related fields
         const hasTitle = schema.fields.some((f) =>
           ["title", "name", "song_title", "track_title"].includes(
             f.name.toLowerCase()
@@ -159,6 +167,91 @@ export class UIIntegrator {
       return;
     }
 
+    if (!this.model) {
+      console.log(
+        chalk.yellow("⚠️  No model set, using fallback component integration")
+      );
+      await this.updateSpotifyMainContentFallback(queryAnalysis, componentPath);
+      return;
+    }
+
+    await this.updateSpotifyMainContentWithGemini(queryAnalysis, componentPath);
+  }
+
+  private async updateSpotifyMainContentWithGemini(
+    queryAnalysis: any,
+    componentPath: string
+  ) {
+    const currentContent = fs.readFileSync(componentPath, "utf8");
+
+    const sectionsInfo = queryAnalysis.sections.map((section: any) => ({
+      sectionName: section.sectionName,
+      targetArray: section.targetArray,
+      hookName: section.hookName,
+      schema: {
+        tableName: section.schema.tableName,
+        fields: section.schema.fields.map((f: any) => ({
+          name: f.name,
+          type: f.type,
+        })),
+      },
+    }));
+
+    const integrationPrompt = `You are a React/TypeScript expert. Update this Spotify main content component to integrate with database hooks.
+
+Current Component Code:
+\`\`\`typescript
+${currentContent}
+\`\`\`
+
+Database Integration Requirements:
+- Sections to integrate: ${JSON.stringify(sectionsInfo, null, 2)}
+- Replace hardcoded data arrays with database hooks
+- Add proper imports for hooks from '@/hooks'
+- Add useEffect to fetch data on mount
+- Add loading states with proper UI
+- Transform database records to match existing interface
+
+For each section:
+1. Import the hook: ${sectionsInfo.map((s: any) => s.hookName).join(", ")}
+2. Replace static arrays with database calls
+3. Map database fields to UI format (id, title, artist, album, image, duration)
+4. Handle loading states gracefully
+
+Field mapping guidelines:
+- title: record.title || record.song_title || record.name || record.playlist_name || record.album_name
+- artist: record.artist || record.artist_name || record.creator || record.description
+- album: record.album || record.album_name || record.collection || record.category
+- image: record.image || record.cover_art || record.artwork_url || record.thumbnail
+- duration: record.duration || record.length || record.total_duration || 180
+
+Maintain all existing styling, component structure, and TypeScript types. Only modify data sources and add loading states.
+
+Generate the complete updated component code with proper React patterns and TypeScript.
+
+Generate ONLY the TypeScript/JSX code, no explanation or markdown formatting.`;
+
+    try {
+      const result = await this.model.generateContent(integrationPrompt);
+      let generatedCode = result.response.text().trim();
+
+      // Clean up any markdown formatting
+      generatedCode = generatedCode
+        .replace(/```typescript\n?/g, "")
+        .replace(/```tsx\n?/g, "")
+        .replace(/```\n?/g, "");
+
+      fs.writeFileSync(componentPath, generatedCode);
+    } catch (error) {
+      console.log(chalk.red(`❌ Error integrating main content: ${error}`));
+      await this.updateSpotifyMainContentFallback(queryAnalysis, componentPath);
+    }
+  }
+
+  private async updateSpotifyMainContentFallback(
+    queryAnalysis: any,
+    componentPath: string
+  ) {
     let content = fs.readFileSync(componentPath, "utf8");
 
     // Add imports for the hooks
@@ -239,36 +332,6 @@ import { ${hookImports} } from '@/hooks'`;
       }
     }
 
-    // Add loading states
-    const loadingStates = queryAnalysis.sections.map(
-      (section: any) => `${section.targetArray}Loading`
-    );
-
-    if (loadingStates.length > 0) {
-      const loadingCheck = `const isLoading = ${loadingStates.join(" || ")};
-
-  if (isLoading) {
-    return (
-      <div className="bg-[var(--color-background-primary)] text-[var(--color-text-primary)] min-h-screen flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[var(--color-primary)] mx-auto mb-4"></div>
-          <p className="text-[var(--color-text-secondary)]">Loading your music...</p>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="bg-[var(--color-background-primary)] text-[var(--color-text-primary)] min-h-screen">`;
-
-      const componentStart = updatedContent.match(
-        /export default function SpotifyMainContent\([^}]+\) \{[\s\S]*?return \(/
-      );
-      if (componentStart) {
-        updatedContent = updatedContent.replace("return (", loadingCheck);
-      }
-    }
-
     fs.writeFileSync(componentPath, updatedContent);
   }
 
@@ -292,6 +355,95 @@ import { ${hookImports} } from '@/hooks'`;
       return;
     }
 
+    if (!this.model) {
+      console.log(
+        chalk.yellow("⚠️  No model set, using fallback sidebar integration")
+      );
+      await this.updateSpotifySidebarFallback(queryAnalysis, componentPath);
+      return;
+    }
+
+    await this.updateSpotifySidebarWithGemini(queryAnalysis, componentPath);
+  }
+
+  private async updateSpotifySidebarWithGemini(
+    queryAnalysis: any,
+    componentPath: string
+  ) {
+    const currentContent = fs.readFileSync(componentPath, "utf8");
+
+    const sidebarSections = queryAnalysis.sections.filter(
+      (s: any) =>
+        s.targetArray === "recentlyPlayed" ||
+        s.sectionName.toLowerCase().includes("playlist")
+    );
+
+    if (sidebarSections.length === 0) return;
+
+    const sectionsInfo = sidebarSections.map((section: any) => ({
+      sectionName: section.sectionName,
+      hookName: section.hookName,
+      schema: {
+        tableName: section.schema.tableName,
+        fields: section.schema.fields.map((f: any) => ({
+          name: f.name,
+          type: f.type,
+        })),
+      },
+    }));
+
+    const integrationPrompt = `You are a React/TypeScript expert. Update this Spotify sidebar component to integrate with database hooks for playlist/sidebar data.
+
+Current Component Code:
+\`\`\`typescript
+${currentContent}
+\`\`\`
+
+Database Integration Requirements:
+- Sidebar sections to integrate: ${JSON.stringify(sectionsInfo, null, 2)}
+- Replace hardcoded playlist arrays with database hooks
+- Add proper imports for hooks from '@/hooks'
+- Add useEffect to fetch data on mount
+- Transform database records to match existing PlaylistItem interface
+
+For each section:
+1. Import the hook: ${sectionsInfo.map((s: any) => s.hookName).join(", ")}
+2. Replace static playlist arrays with database calls
+3. Map database fields to PlaylistItem format (id, title, subtitle, image, duration)
+
+Field mapping guidelines:
+- title: record.title || record.name || record.playlist_name || record.song_title
+- subtitle: record.subtitle || record.description || record.artist || "Playlist"
+- image: record.image || record.cover_art || record.thumbnail
+- duration: record.duration || record.total_duration || 180
+
+Maintain all existing styling, component structure, and TypeScript types. Only modify data sources.
+
+Generate the complete updated component code with proper React patterns and TypeScript.
+
+Generate ONLY the TypeScript/JSX code, no explanation or markdown formatting.`;
+
+    try {
+      const result = await this.model.generateContent(integrationPrompt);
+      let generatedCode = result.response.text().trim();
+
+      // Clean up any markdown formatting
+      generatedCode = generatedCode
+        .replace(/```typescript\n?/g, "")
+        .replace(/```tsx\n?/g, "")
+        .replace(/```\n?/g, "");
+
+      fs.writeFileSync(componentPath, generatedCode);
+    } catch (error) {
+      console.log(chalk.red(`❌ Error integrating sidebar: ${error}`));
+      await this.updateSpotifySidebarFallback(queryAnalysis, componentPath);
+    }
+  }
+
+  private async updateSpotifySidebarFallback(
+    queryAnalysis: any,
+    componentPath: string
+  ) {
     let content = fs.readFileSync(componentPath, "utf8");
 
     const hookImports = queryAnalysis.sections

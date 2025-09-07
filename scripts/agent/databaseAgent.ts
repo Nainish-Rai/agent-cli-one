@@ -22,13 +22,17 @@ export class DatabaseAgent extends BaseAgent {
 
   async processQuery(query: string) {
     this.log({ type: "thinking", message: "Processing your request..." });
+
+    // Initialize all modules with the Gemini model
+    this.initializeModulesWithModel();
+
     this.startSpinner("Analyzing project structure...");
     await this.projectAnalyzer.getProjectContext();
     this.stopSpinner(true, "Project analysis complete");
 
     this.log({
       type: "analyzing",
-      message: "Understanding your requirements...",
+      message: "Understanding your requirements using Gemini AI...",
     });
     const schemaDefinitions = await this.schemaGenerator.parseQueryForSchemas(
       query,
@@ -64,7 +68,7 @@ export class DatabaseAgent extends BaseAgent {
     );
     if (!schemasValid) return;
 
-    // Implement schemas
+    // Implement schemas using Gemini-generated code
     for (const schemaDef of schemaDefinitions) {
       await this.databaseWorkflow.implementSchema(
         schemaDef,
@@ -87,17 +91,25 @@ export class DatabaseAgent extends BaseAgent {
     // Run migrations
     await this.databaseWorkflow.runMigrations();
 
-    // Generate API routes
+    // Generate API routes using Gemini
+    this.log({
+      type: "creating",
+      message: "Generating API routes with Gemini AI...",
+    });
     for (const schemaDef of schemaDefinitions) {
       await this.apiGenerator.generateApiRoute(schemaDef);
     }
 
-    // Generate seed data
+    // Generate seed data using Gemini
+    this.log({
+      type: "creating",
+      message: "Generating realistic seed data with Gemini AI...",
+    });
     for (const schemaDef of schemaDefinitions) {
       await this.seedGenerator.generateSeedData(schemaDef);
     }
 
-    // Generate frontend integration
+    // Generate frontend integration using Gemini
     await this.generateFrontendIntegration(schemaDefinitions, query);
 
     console.log(chalk.green("\n✅ Database implementation complete!"));
@@ -106,6 +118,26 @@ export class DatabaseAgent extends BaseAgent {
         "🚀 Your new database tables are ready with API endpoints and sample data."
       )
     );
+    console.log(
+      chalk.cyan(
+        "🤖 All code was generated using Gemini AI for maximum relevance and quality."
+      )
+    );
+  }
+
+  private initializeModulesWithModel() {
+    // Pass the Gemini model to all modules that need it
+    this.schemaGenerator.setModel(this.model);
+    this.apiGenerator.setModel(this.model);
+    this.seedGenerator.setModel(this.model);
+    this.frontendIntegrator.setModel(this.model);
+    this.uiIntegrator.setModel(this.model);
+
+    this.log({
+      type: "thinking",
+      message:
+        "Initialized all modules with Gemini AI model for dynamic code generation",
+    });
   }
 
   private async generateFrontendIntegration(
@@ -114,16 +146,16 @@ export class DatabaseAgent extends BaseAgent {
   ) {
     this.log({
       type: "integrating",
-      message: "Generating frontend integration suggestions",
+      message: "Generating frontend integration with Gemini AI...",
     });
 
-    // Generate React hooks and display API info
+    // Generate React hooks and display API info using Gemini
     await this.frontendIntegrator.generateFrontendIntegration(
       schemaDefinitions,
       query
     );
 
-    // Integrate into Spotify components
+    // Integrate into Spotify components using Gemini
     await this.integrateIntoSpotifyComponents(schemaDefinitions, query);
   }
 
@@ -133,7 +165,8 @@ export class DatabaseAgent extends BaseAgent {
   ) {
     this.log({
       type: "integrating",
-      message: "Integrating database hooks into Spotify components",
+      message:
+        "Integrating database hooks into Spotify components with Gemini AI...",
     });
 
     // Analyze query to determine which UI sections to update

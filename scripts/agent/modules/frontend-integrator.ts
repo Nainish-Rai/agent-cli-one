@@ -5,6 +5,16 @@ import { SchemaDefinition } from "../types";
 import { toPascalCase } from "../utils";
 
 export class FrontendIntegrator {
+  private model: any;
+
+  constructor(model?: any) {
+    this.model = model;
+  }
+
+  setModel(model: any) {
+    this.model = model;
+  }
+
   async generateFrontendIntegration(
     schemaDefinitions: SchemaDefinition[],
     query: string
@@ -67,12 +77,113 @@ export class FrontendIntegrator {
   }
 
   private async generateReactHook(schemaDef: SchemaDefinition) {
+    if (!this.model) {
+      console.log(
+        chalk.yellow("⚠️  No model set, using fallback hook template")
+      );
+      const hookContent = this.generateReactHookFallback(schemaDef);
+      await this.writeHookFile(schemaDef, hookContent);
+      return;
+    }
+
+    const hookContent = await this.generateReactHookContent(schemaDef);
+    await this.writeHookFile(schemaDef, hookContent);
+  }
+
+  private async writeHookFile(schemaDef: SchemaDefinition, content: string) {
+    const tableName = schemaDef.tableName;
+    const className = toPascalCase(tableName);
+    const hookName = `use${className}`;
+
+    const hooksDir = path.join(process.cwd(), "src", "hooks");
+    const hookPath = path.join(hooksDir, `${hookName}.ts`);
+
+    fs.mkdirSync(hooksDir, { recursive: true });
+    fs.writeFileSync(hookPath, content);
+
+    await this.updateHooksIndex();
+  }
+
+  private async generateReactHookContent(
+    schemaDef: SchemaDefinition
+  ): Promise<string> {
+    const tableName = schemaDef.tableName;
+    const className = toPascalCase(tableName);
+    const hookName = `use${className}`;
+    const apiEndpoint = `/api/${tableName.replace(/_/g, "-")}`;
+    const hasUserId = schemaDef.fields.some((f) => f.name === "user_id");
+
+    const fieldsInfo = schemaDef.fields.map((f) => ({
+      name: f.name,
+      type: f.type,
+      isRequired:
+        f.constraints?.includes("notNull()") &&
+        !["id", "created_at", "updated_at"].includes(f.name),
+    }));
+
+    const hookPrompt = `Generate a complete React hook for managing database operations with TypeScript.
+
+Table Information:
+- Table name: ${tableName}
+- Class name: ${className}
+- Hook name: ${hookName}
+- API endpoint: ${apiEndpoint}
+- Has user_id field: ${hasUserId}
+- Fields: ${JSON.stringify(fieldsInfo, null, 2)}
+
+Requirements:
+1. Use modern React hooks (useState, useCallback, useEffect)
+2. Include proper TypeScript types
+3. Import types from '@/db/schema'
+4. Implement CRUD operations (create, read, update, delete)
+5. Support pagination (limit, offset, total, hasMore)
+6. Support filtering by user_id if applicable
+7. Include loading states and error handling
+8. Use fetch API with proper error handling
+9. Return consistent data structure
+
+Hook interface should include:
+- data: { records: T[], loading: boolean, error: string | null, pagination: {...} }
+- fetchAll: (params?) => Promise<void>
+- fetchById: (id: number) => Promise<T | null>
+- create: (data: NewT) => Promise<T | null>
+- update: (id: number, data: Partial<NewT>) => Promise<T | null>
+- delete: (id: number) => Promise<boolean>
+- clearError: () => void
+
+API Response format:
+\`\`\`typescript
+// Success: { success: true, data: T | T[], pagination?: {...} }
+// Error: { success: false, error: string }
+\`\`\`
+
+Generate a complete, production-ready React hook with modern TypeScript patterns.
+
+Generate ONLY the TypeScript code, no explanation or markdown formatting.`;
+
+    try {
+      const result = await this.model.generateContent(hookPrompt);
+      let generatedCode = result.response.text().trim();
+
+      // Clean up any markdown formatting
+      generatedCode = generatedCode
+        .replace(/```typescript\n?/g, "")
+        .replace(/```\n?/g, "");
+
+      return generatedCode;
+    } catch (error) {
+      console.log(chalk.red(`❌ Error generating React hook: ${error}`));
+      return this.generateReactHookFallback(schemaDef);
+    }
+  }
+
+  private generateReactHookFallback(schemaDef: SchemaDefinition): string {
     const tableName = schemaDef.tableName;
     const className = toPascalCase(tableName);
     const hookName = `use${className}`;
     const apiEndpoint = `/api/${tableName.replace(/_/g, "-")}`;
 
-    const hookContent = `import { useState, useCallback } from 'react';
+    return `import { useState, useCallback } from 'react';
 import { ${className}, New${className} } from '@/db/schema';
 
 interface ${className}State {
@@ -280,14 +391,6 @@ export function ${hookName}() {
   };
 }
 `;
-
-    const hooksDir = path.join(process.cwd(), "src", "hooks");
-    const hookPath = path.join(hooksDir, `${hookName}.ts`);
-
-    fs.mkdirSync(hooksDir, { recursive: true });
-    fs.writeFileSync(hookPath, hookContent);
-
-    await this.updateHooksIndex();
   }
 
   private async integrateIntoSpotifyComponents(
@@ -455,6 +558,7 @@ export function ${hookName}() {
   ) {
     // Delegate to UIIntegrator for complex component updates
     const uiIntegrator = new (await import("./ui-integrator")).UIIntegrator();
+    uiIntegrator.setModel(this.model);
     await uiIntegrator.updateSpotifyMainContent(
       schemaDefinitions,
       queryAnalysis
@@ -467,6 +571,7 @@ export function ${hookName}() {
   ) {
     // Delegate to UIIntegrator for complex component updates
     const uiIntegrator = new (await import("./ui-integrator")).UIIntegrator();
+    uiIntegrator.setModel(this.model);
     await uiIntegrator.updateSpotifySidebar(schemaDefinitions, queryAnalysis);
   }
 
