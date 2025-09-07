@@ -109,6 +109,9 @@ Generate a complete TypeScript seed file with:
 - Error handling
 - Cleanup
 
+Note: Import schema from "@/db/schema";
+exampple: " import { dislikedSongs } from "@/db/schema"; "
+
 Generate ONLY the TypeScript code, no explanation or markdown formatting.`;
 
     try {
@@ -144,15 +147,28 @@ import { ${tableName}, type New${className} } from "../src/db/schema/${schemaDef
 dotenv.config();
 
 async function seed() {
+  // Check if DATABASE_URL is available
+  if (!process.env.DATABASE_URL) {
+    console.error('❌ DATABASE_URL environment variable is not set');
+    console.log('Please ensure your .env file contains a valid DATABASE_URL');
+    process.exit(1);
+  }
+
   const pool = new Pool({
-    connectionString: process.env.DATABASE_URL || 'postgresql://localhost:5432/spotify_clone'
+    connectionString: process.env.DATABASE_URL,
+    ssl: process.env.DATABASE_URL.includes('neon.tech') ? { rejectUnauthorized: false } : false
   });
+
   const db = drizzle(pool);
 
   const sampleData: New${className}[] = ${sampleDataGenerator};
 
   try {
     console.log('🌱 Seeding ${tableName} with sample data...');
+
+    // Test database connection first
+    await pool.query('SELECT 1');
+    console.log('✅ Database connection successful');
 
     const insertedRecords = await db.insert(${tableName}).values(sampleData).returning();
 
@@ -161,6 +177,14 @@ async function seed() {
 
   } catch (error) {
     console.error('❌ Error seeding ${tableName}:', error);
+
+    if (error.code === 'ECONNREFUSED') {
+      console.log('💡 Database connection failed. Please check:');
+      console.log('  - Your DATABASE_URL in .env file');
+      console.log('  - Database server is running');
+      console.log('  - Network connectivity');
+    }
+
     process.exit(1);
   } finally {
     await pool.end();
