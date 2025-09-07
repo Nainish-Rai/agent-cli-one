@@ -38,7 +38,10 @@ export class ApiGenerator {
     await this.writeDynamicApiRoute(schemaDef, apiContent);
   }
 
-  private async writeMainApiRoute(schemaDef: SchemaDefinition, content: string) {
+  private async writeMainApiRoute(
+    schemaDef: SchemaDefinition,
+    content: string
+  ) {
     const apiPath = path.join(
       process.cwd(),
       "src",
@@ -56,7 +59,10 @@ export class ApiGenerator {
     );
   }
 
-  private async writeDynamicApiRoute(schemaDef: SchemaDefinition, content: string) {
+  private async writeDynamicApiRoute(
+    schemaDef: SchemaDefinition,
+    content: string
+  ) {
     const apiPath = path.join(
       process.cwd(),
       "src",
@@ -70,34 +76,43 @@ export class ApiGenerator {
     fs.writeFileSync(apiPath, content);
     console.log(
       chalk.gray(
-        `   📁 Created: api/${schemaDef.tableName.replace(/_/g, "-")}/[id]/route.ts`
+        `   📁 Created: api/${schemaDef.tableName.replace(
+          /_/g,
+          "-"
+        )}/[id]/route.ts`
       )
     );
   }
 
-  private async generateMainRouteContent(schemaDef: SchemaDefinition): Promise<string> {
+  private async generateMainRouteContent(
+    schemaDef: SchemaDefinition
+  ): Promise<string> {
     const tableName = schemaDef.tableName;
     const className = toPascalCase(tableName);
     const hasUserId = schemaDef.fields.some((f) => f.name === "user_id");
 
     const fieldsInfo = schemaDef.fields
-      .filter(f => !["id", "created_at", "updated_at"].includes(f.name))
+      .filter((f) => !["id", "created_at", "updated_at"].includes(f.name))
       .map((f) => ({
         name: f.name,
         type: f.type,
         isRequired: f.constraints?.includes("notNull()"),
       }));
 
-    const requiredFields = fieldsInfo.filter(f => f.isRequired).map(f => f.name);
+    const requiredFields = fieldsInfo
+      .filter((f) => f.isRequired)
+      .map((f) => f.name);
 
     const apiPrompt = `Generate a Next.js API route for the main CRUD operations (GET all, POST create) following this exact pattern:
 
 Table: ${tableName}
 Type: ${className}
-Required fields: ${requiredFields.join(', ')}
+Required fields: ${requiredFields.join(", ")}
 Has user_id: ${hasUserId}
 
 Generate EXACTLY this structure:
+NOTE: for tableName use camelCase ie import { recentlyPlayedSongs } from '@/db/schema'; instead of import { recently_played_songs } from '@/db/schema';
+
 
 \`\`\`typescript
 import { NextRequest, NextResponse } from 'next/server';
@@ -121,18 +136,24 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { ${fieldsInfo.map(f => f.name).join(', ')} } = body;
+    const { ${fieldsInfo.map((f) => f.name).join(", ")} } = body;
 
-    ${requiredFields.length > 0 ? `
-    if (!${requiredFields.join(' || !')}) {
+    ${
+      requiredFields.length > 0
+        ? `
+    if (!${requiredFields.join(" || !")}) {
       return NextResponse.json(
-        { error: '${requiredFields.join(', ')} ${requiredFields.length > 1 ? 'are' : 'is'} required' },
+        { error: '${requiredFields.join(", ")} ${
+            requiredFields.length > 1 ? "are" : "is"
+          } required' },
         { status: 400 }
       );
-    }` : ''}
+    }`
+        : ""
+    }
 
     const new${className} = await db.insert(${tableName}).values({
-      ${fieldsInfo.map(f => f.name).join(',\n      ')},
+      ${fieldsInfo.map((f) => f.name).join(",\n      ")},
     }).returning();
 
     return NextResponse.json(new${className}[0], { status: 201 });
@@ -163,12 +184,14 @@ Return ONLY the TypeScript code, no markdown blocks or explanations.`;
     }
   }
 
-  private async generateDynamicRouteContent(schemaDef: SchemaDefinition): Promise<string> {
+  private async generateDynamicRouteContent(
+    schemaDef: SchemaDefinition
+  ): Promise<string> {
     const tableName = schemaDef.tableName;
     const className = toPascalCase(tableName);
 
     const fieldsInfo = schemaDef.fields
-      .filter(f => !["id", "created_at", "updated_at"].includes(f.name))
+      .filter((f) => !["id", "created_at", "updated_at"].includes(f.name))
       .map((f) => ({
         name: f.name,
         type: f.type,
@@ -225,12 +248,16 @@ export async function PUT(
   try {
     const ${tableName.slice(0, -1)}Id = parseInt(params.id);
     const body = await request.json();
-    const { ${fieldsInfo.map(f => f.name).join(', ')} } = body;
+    const { ${fieldsInfo.map((f) => f.name).join(", ")} } = body;
 
     const updated${className} = await db.update(${tableName})
       .set({
-        ${fieldsInfo.map(f => f.name).join(',\n        ')},
-        ${schemaDef.fields.some(f => f.name === 'updated_at') ? 'updatedAt: new Date(),' : ''}
+        ${fieldsInfo.map((f) => f.name).join(",\n        ")},
+        ${
+          schemaDef.fields.some((f) => f.name === "updated_at")
+            ? "updatedAt: new Date(),"
+            : ""
+        }
       })
       .where(eq(${tableName}.id, ${tableName.slice(0, -1)}Id))
       .returning();
@@ -300,12 +327,4 @@ Return ONLY the TypeScript code, no markdown blocks or explanations.`;
       throw new Error(`Failed to generate dynamic API route: ${error}`);
     }
   }
-
-  // Remove old methods that are no longer needed
-  private async writeApiRoute(schemaDef: SchemaDefinition, content: string) {
-    // This method is kept for backward compatibility but redirects to new method
-    await this.writeMainApiRoute(schemaDef, content);
-  }
-
-  // ...existing validation methods can be removed or simplified...
 }
