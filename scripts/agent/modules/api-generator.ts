@@ -23,11 +23,22 @@ export class ApiGenerator {
       );
     }
 
-    const apiContent = await this.generateApiRouteContent(schemaDef);
-    await this.writeApiRoute(schemaDef, apiContent);
+    // Generate both the main route and the dynamic [id] route
+    await this.generateMainApiRoute(schemaDef);
+    await this.generateDynamicApiRoute(schemaDef);
   }
 
-  private async writeApiRoute(schemaDef: SchemaDefinition, content: string) {
+  private async generateMainApiRoute(schemaDef: SchemaDefinition) {
+    const apiContent = await this.generateMainRouteContent(schemaDef);
+    await this.writeMainApiRoute(schemaDef, apiContent);
+  }
+
+  private async generateDynamicApiRoute(schemaDef: SchemaDefinition) {
+    const apiContent = await this.generateDynamicRouteContent(schemaDef);
+    await this.writeDynamicApiRoute(schemaDef, apiContent);
+  }
+
+  private async writeMainApiRoute(schemaDef: SchemaDefinition, content: string) {
     const apiPath = path.join(
       process.cwd(),
       "src",
@@ -45,374 +56,256 @@ export class ApiGenerator {
     );
   }
 
-  private async generateApiRouteContent(
-    schemaDef: SchemaDefinition
-  ): Promise<string> {
+  private async writeDynamicApiRoute(schemaDef: SchemaDefinition, content: string) {
+    const apiPath = path.join(
+      process.cwd(),
+      "src",
+      "app",
+      "api",
+      schemaDef.tableName.replace(/_/g, "-"),
+      "[id]",
+      "route.ts"
+    );
+    fs.mkdirSync(path.dirname(apiPath), { recursive: true });
+    fs.writeFileSync(apiPath, content);
+    console.log(
+      chalk.gray(
+        `   📁 Created: api/${schemaDef.tableName.replace(/_/g, "-")}/[id]/route.ts`
+      )
+    );
+  }
+
+  private async generateMainRouteContent(schemaDef: SchemaDefinition): Promise<string> {
     const tableName = schemaDef.tableName;
     const className = toPascalCase(tableName);
     const hasUserId = schemaDef.fields.some((f) => f.name === "user_id");
 
-    const fieldsInfo = schemaDef.fields.map((f) => ({
-      name: f.name,
-      type: f.type,
-      isRequired:
-        f.constraints?.includes("notNull()") &&
-        !["id", "created_at", "updated_at"].includes(f.name),
-    }));
+    const fieldsInfo = schemaDef.fields
+      .filter(f => !["id", "created_at", "updated_at"].includes(f.name))
+      .map((f) => ({
+        name: f.name,
+        type: f.type,
+        isRequired: f.constraints?.includes("notNull()"),
+      }));
 
-    const apiPrompt = `You are a Next.js API route code generator. Generate a COMPLETE, SYNTACTICALLY CORRECT TypeScript file for a database table with full CRUD operations.
+    const requiredFields = fieldsInfo.filter(f => f.isRequired).map(f => f.name);
 
-CRITICAL REQUIREMENTS - MUST BE FOLLOWED EXACTLY:
+    const apiPrompt = `Generate a Next.js API route for the main CRUD operations (GET all, POST create) following this exact pattern:
 
-1. COMPLETE FILE STRUCTURE:
-   - All imports at the top
-   - Database setup with proper closing braces
-   - All 4 HTTP methods (GET, POST, PUT, DELETE) with complete function declarations
-   - Each function must have proper opening and closing braces
+Table: ${tableName}
+Type: ${className}
+Required fields: ${requiredFields.join(', ')}
+Has user_id: ${hasUserId}
 
-2. EXACT DATABASE SETUP (copy this exactly):
+Generate EXACTLY this structure:
+
 \`\`\`typescript
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL || "postgresql://localhost:5432/spotify_clone",
-  ssl: process.env.DATABASE_URL?.includes('neon.tech') ? { rejectUnauthorized: false } : false
-});
-const db = drizzle(pool);
-\`\`\`
+import { NextRequest, NextResponse } from 'next/server';
+import { db } from '@/db';
+import { ${tableName} } from '@/db/schema';
 
-3. EXACT IMPORTS (copy these exactly):
-\`\`\`typescript
-import { NextRequest, NextResponse } from "next/server";
-import { drizzle } from "drizzle-orm/node-postgres";
-import { Pool } from "pg";
-import { ${tableName}, type ${className}, type New${className} } from "@/db/schema";
-import { desc, eq, and, count } from "drizzle-orm";
-\`\`\`
-
-4. FUNCTION STRUCTURE - Each function must be complete:
-\`\`\`typescript
-export async function GET(request: NextRequest) {
+// GET - Fetch all ${tableName}
+export async function GET() {
   try {
-    // function body here
-    return NextResponse.json({ success: true, data: result });
+    const all${className} = await db.select().from(${tableName});
+    return NextResponse.json(all${className});
   } catch (error) {
-    return NextResponse.json({ success: false, error: "Error message" }, { status: 500 });
+    return NextResponse.json(
+      { error: 'Failed to fetch ${tableName}' },
+      { status: 500 }
+    );
+  }
+}
+
+// POST - Create a new ${tableName.slice(0, -1)}
+export async function POST(request: NextRequest) {
+  try {
+    const body = await request.json();
+    const { ${fieldsInfo.map(f => f.name).join(', ')} } = body;
+
+    ${requiredFields.length > 0 ? `
+    if (!${requiredFields.join(' || !')}) {
+      return NextResponse.json(
+        { error: '${requiredFields.join(', ')} ${requiredFields.length > 1 ? 'are' : 'is'} required' },
+        { status: 400 }
+      );
+    }` : ''}
+
+    const new${className} = await db.insert(${tableName}).values({
+      ${fieldsInfo.map(f => f.name).join(',\n      ')},
+    }).returning();
+
+    return NextResponse.json(new${className}[0], { status: 201 });
+  } catch (error) {
+    return NextResponse.json(
+      { error: 'Failed to create ${tableName.slice(0, -1)}' },
+      { status: 500 }
+    );
   }
 }
 \`\`\`
 
-5. PARAMETER VALIDATION must be INSIDE functions, not orphaned:
-   - URL parameters: const { searchParams } = new URL(request.url);
-   - Body validation: const body = await request.json();
+Return ONLY the TypeScript code, no markdown blocks or explanations.`;
 
-Table Information:
-- Table name: ${tableName}
-- Class name: ${className}
-- Has user_id field: ${hasUserId}
-- Fields: ${JSON.stringify(fieldsInfo, null, 2)}
+    try {
+      const result = await this.model.generateContent(apiPrompt);
+      let generatedCode = result.response.text().trim();
 
-REQUIRED FUNCTIONALITY:
-- GET: Support id parameter for single record, pagination (limit/offset), filtering by user_id
-- POST: Create new record with validation of required fields
-- PUT: Update record by id with validation
-- DELETE: Delete record by id
+      // Clean the response
+      generatedCode = generatedCode
+        .replace(/```typescript\n?/g, "")
+        .replace(/```\n?/g, "")
+        .trim();
 
-VALIDATION CHECKLIST (ensure all are met):
-✓ All imports present and correct
-✓ Database pool has proper closing brace and semicolon
-✓ Database drizzle initialization present
-✓ All 4 functions declared with export async function NAME(request: NextRequest)
-✓ All functions have try-catch blocks
-✓ All functions have proper opening and closing braces
-✓ No orphaned code outside functions
-✓ Consistent error response format: { success: false, error: "message" }
-✓ Consistent success response format: { success: true, data: result }
-
-Generate ONLY the complete TypeScript code. No explanations, no markdown formatting, no comments.
-
-START YOUR RESPONSE WITH:
-import { NextRequest, NextResponse } from "next/server";`;
-
-    let attempts = 0;
-    const maxAttempts = 3;
-
-    while (attempts < maxAttempts) {
-      attempts++;
-
-      try {
-        const result = await this.model.generateContent(apiPrompt);
-        let generatedCode = result.response.text().trim();
-
-        // Clean the response
-        generatedCode = generatedCode
-          .replace(/```typescript\n?/g, "")
-          .replace(/```\n?/g, "")
-          .replace(/\/\/[^\n]*\n/g, "") // Remove single-line comments
-          .replace(/\/\*[\s\S]*?\*\//g, ""); // Remove multi-line comments
-
-        // Validate the generated code
-        const validationResult = this.validateGeneratedCode(
-          generatedCode,
-          schemaDef
-        );
-
-        if (validationResult.isValid) {
-          console.log(
-            chalk.green(`✅ Generated valid API route on attempt ${attempts}`)
-          );
-          return this.postProcessGeneratedCode(generatedCode, schemaDef);
-        } else {
-          console.log(
-            chalk.yellow(
-              `⚠️  Attempt ${attempts} failed validation: ${validationResult.errors.join(
-                ", "
-              )}`
-            )
-          );
-
-          if (attempts < maxAttempts) {
-            // Enhance prompt with specific validation errors for next attempt
-            const enhancedPrompt =
-              apiPrompt +
-              `
-
-PREVIOUS ATTEMPT FAILED WITH THESE ERRORS:
-${validationResult.errors.map((error) => `- ${error}`).join("\n")}
-
-FIX THESE SPECIFIC ISSUES in your response. Pay special attention to:
-- Proper brace balancing
-- Complete function declarations
-- Database initialization
-- No orphaned code`;
-
-            const retryResult = await this.model.generateContent(
-              enhancedPrompt
-            );
-            generatedCode = retryResult.response
-              .text()
-              .trim()
-              .replace(/```typescript\n?/g, "")
-              .replace(/```\n?/g, "")
-              .replace(/\/\/[^\n]*\n/g, "")
-              .replace(/\/\*[\s\S]*?\*\//g, "");
-          }
-        }
-      } catch (error) {
-        console.log(chalk.red(`❌ Error on attempt ${attempts}: ${error}`));
-        if (attempts === maxAttempts) {
-          throw new Error(
-            `Failed to generate valid API route after ${maxAttempts} attempts: ${error}`
-          );
-        }
-      }
+      return generatedCode;
+    } catch (error) {
+      throw new Error(`Failed to generate main API route: ${error}`);
     }
-
-    throw new Error(
-      `Failed to generate valid API route after ${maxAttempts} attempts`
-    );
   }
 
-  private validateGeneratedCode(
-    code: string,
-    schemaDef: SchemaDefinition
-  ): { isValid: boolean; errors: string[] } {
-    const errors: string[] = [];
+  private async generateDynamicRouteContent(schemaDef: SchemaDefinition): Promise<string> {
     const tableName = schemaDef.tableName;
     const className = toPascalCase(tableName);
 
-    // Check for required imports
-    if (!code.includes("import { NextRequest, NextResponse }")) {
-      errors.push("Missing NextRequest/NextResponse imports");
-    }
-    if (!code.includes("import { drizzle }")) {
-      errors.push("Missing drizzle import");
-    }
-    if (!code.includes(`import { ${tableName},`)) {
-      errors.push(`Missing ${tableName} table import`);
-    }
+    const fieldsInfo = schemaDef.fields
+      .filter(f => !["id", "created_at", "updated_at"].includes(f.name))
+      .map((f) => ({
+        name: f.name,
+        type: f.type,
+        isRequired: f.constraints?.includes("notNull()"),
+      }));
 
-    // Check database setup
-    if (!code.includes("const pool = new Pool({")) {
-      errors.push("Missing database pool initialization");
-    }
-    if (!code.includes("const db = drizzle(pool);")) {
-      errors.push("Missing database drizzle initialization");
-    }
+    const apiPrompt = `Generate a Next.js dynamic API route for individual operations (GET by ID, PUT update, DELETE) following this exact pattern:
 
-    // Check for proper pool closing
-    const poolMatch = code.match(/const pool = new Pool\(\{[\s\S]*?\}\);/);
-    if (!poolMatch) {
-      errors.push("Database pool configuration not properly closed");
-    }
+Table: ${tableName}
+Type: ${className}
 
-    // Check for all HTTP methods with more flexible regex
-    const requiredMethods = ["GET", "POST", "PUT", "DELETE"];
-    for (const method of requiredMethods) {
-      const methodRegex = new RegExp(
-        `export\\s+async\\s+function\\s+${method}\\s*\\(`,
-        "i"
-      );
-      if (!methodRegex.test(code)) {
-        errors.push(`Missing ${method} function declaration`);
-      }
-    }
+Generate EXACTLY this structure:
 
-    // Check for orphaned parameter validation
-    const lines = code.split("\n");
-    let insideFunction = false;
-    let braceCount = 0;
+\`\`\`typescript
+import { NextRequest, NextResponse } from 'next/server';
+import { db } from '@/db';
+import { ${tableName} } from '@/db/schema';
+import { eq } from 'drizzle-orm';
 
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i].trim();
+// GET - Fetch a single ${tableName.slice(0, -1)} by ID
+export async function GET(
+  request: NextRequest,
+  { params }: { params: { id: string } }
+) {
+  try {
+    const ${tableName.slice(0, -1)}Id = parseInt(params.id);
 
-      if (line.includes("export async function")) {
-        insideFunction = true;
-        braceCount = 0;
-      }
+    const ${tableName.slice(0, -1)} = await db.select()
+      .from(${tableName})
+      .where(eq(${tableName}.id, ${tableName.slice(0, -1)}Id))
+      .limit(1);
 
-      if (insideFunction) {
-        braceCount += (line.match(/{/g) || []).length;
-        braceCount -= (line.match(/}/g) || []).length;
-
-        if (braceCount === 0 && line.includes("}")) {
-          insideFunction = false;
-        }
-      }
-
-      // Check for parameter validation outside functions
-      if (
-        !insideFunction &&
-        (line.includes("searchParams") || line.includes("request.json()"))
-      ) {
-        errors.push("Parameter validation code found outside function");
-        break;
-      }
-    }
-
-    // Check brace balance
-    const openBraces = (code.match(/{/g) || []).length;
-    const closeBraces = (code.match(/}/g) || []).length;
-    if (openBraces !== closeBraces) {
-      errors.push(
-        `Unbalanced braces: ${openBraces} opening, ${closeBraces} closing`
+    if (${tableName.slice(0, -1)}.length === 0) {
+      return NextResponse.json(
+        { error: '${className} not found' },
+        { status: 404 }
       );
     }
 
-    return {
-      isValid: errors.length === 0,
-      errors,
-    };
+    return NextResponse.json(${tableName.slice(0, -1)}[0]);
+  } catch (error) {
+    return NextResponse.json(
+      { error: 'Failed to fetch ${tableName.slice(0, -1)}' },
+      { status: 500 }
+    );
+  }
+}
+
+// PUT - Update a ${tableName.slice(0, -1)}
+export async function PUT(
+  request: NextRequest,
+  { params }: { params: { id: string } }
+) {
+  try {
+    const ${tableName.slice(0, -1)}Id = parseInt(params.id);
+    const body = await request.json();
+    const { ${fieldsInfo.map(f => f.name).join(', ')} } = body;
+
+    const updated${className} = await db.update(${tableName})
+      .set({
+        ${fieldsInfo.map(f => f.name).join(',\n        ')},
+        ${schemaDef.fields.some(f => f.name === 'updated_at') ? 'updatedAt: new Date(),' : ''}
+      })
+      .where(eq(${tableName}.id, ${tableName.slice(0, -1)}Id))
+      .returning();
+
+    if (updated${className}.length === 0) {
+      return NextResponse.json(
+        { error: '${className} not found' },
+        { status: 404 }
+      );
+    }
+
+    return NextResponse.json(updated${className}[0]);
+  } catch (error) {
+    return NextResponse.json(
+      { error: 'Failed to update ${tableName.slice(0, -1)}' },
+      { status: 500 }
+    );
+  }
+}
+
+// DELETE - Delete a ${tableName.slice(0, -1)}
+export async function DELETE(
+  request: NextRequest,
+  { params }: { params: { id: string } }
+) {
+  try {
+    const ${tableName.slice(0, -1)}Id = parseInt(params.id);
+
+    const deleted${className} = await db.delete(${tableName})
+      .where(eq(${tableName}.id, ${tableName.slice(0, -1)}Id))
+      .returning();
+
+    if (deleted${className}.length === 0) {
+      return NextResponse.json(
+        { error: '${className} not found' },
+        { status: 404 }
+      );
+    }
+
+    return NextResponse.json(
+      { message: '${className} deleted successfully' },
+      { status: 200 }
+    );
+  } catch (error) {
+    return NextResponse.json(
+      { error: 'Failed to delete ${tableName.slice(0, -1)}' },
+      { status: 500 }
+    );
+  }
+}
+\`\`\`
+
+Return ONLY the TypeScript code, no markdown blocks or explanations.`;
+
+    try {
+      const result = await this.model.generateContent(apiPrompt);
+      let generatedCode = result.response.text().trim();
+
+      // Clean the response
+      generatedCode = generatedCode
+        .replace(/```typescript\n?/g, "")
+        .replace(/```\n?/g, "")
+        .trim();
+
+      return generatedCode;
+    } catch (error) {
+      throw new Error(`Failed to generate dynamic API route: ${error}`);
+    }
   }
 
-  private postProcessGeneratedCode(
-    code: string,
-    schemaDef: SchemaDefinition
-  ): string {
-    const tableName = schemaDef.tableName;
-    const className = toPascalCase(tableName);
-
-    // Fix common issues in generated code
-    let fixedCode = code;
-
-    // Ensure proper connection string termination
-    fixedCode = fixedCode.replace(
-      /connectionString: process\.env\.DATABASE_URL \|\| "postgresql:[^"]*$/gm,
-      `connectionString: process.env.DATABASE_URL || "postgresql://localhost:5432/spotify_clone"`
-    );
-
-    // Ensure correct Drizzle import
-    fixedCode = fixedCode.replace(
-      /from ['"](drizzle-orm\/pg-core|drizzle-orm\/postgres-js)['"]/g,
-      'from "drizzle-orm/node-postgres"'
-    );
-
-    // Fix type import patterns
-    fixedCode = fixedCode.replace(/\$inferSelect|\$inferInsert/g, (match) =>
-      match === "$inferSelect" ? className : `New${className}`
-    );
-
-    // Ensure proper table import
-    if (!fixedCode.includes(`{ ${tableName},`)) {
-      fixedCode = fixedCode.replace(
-        /import.*from "@\/db\/schema";/,
-        `import { ${tableName}, type ${className}, type New${className} } from "@/db/schema";`
-      );
-    }
-
-    // Fix missing closing braces in Pool configuration
-    fixedCode = fixedCode.replace(
-      /ssl: process\.env\.DATABASE_URL\?\.includes\('neon\.tech'\) \? \{ rejectUnauthorized: false \} : false$/gm,
-      `ssl: process.env.DATABASE_URL?.includes('neon.tech') ? { rejectUnauthorized: false } : false\n});`
-    );
-
-    // Ensure database initialization is present
-    if (!fixedCode.includes("const db = drizzle(pool);")) {
-      fixedCode = fixedCode.replace(
-        /const pool = new Pool\(\{[\s\S]*?\}\);/,
-        "$&\nconst db = drizzle(pool);"
-      );
-    }
-
-    // Fix orphaned parameter validation by ensuring it's inside a function
-    const orphanedValidationRegex =
-      /^(?:.*\n)*(\s*const \{ searchParams \}[\s\S]*?const id = searchParams\.get\('id'\);)\s*$/gm;
-    if (orphanedValidationRegex.test(fixedCode)) {
-      // Remove orphaned validation code
-      fixedCode = fixedCode.replace(orphanedValidationRegex, "");
-    }
-
-    // Fix incomplete function declarations
-    fixedCode = fixedCode.replace(
-      /export async function (GET|POST|PUT|DELETE)\s*\(/g,
-      "export async function $1(request: NextRequest"
-    );
-
-    // Ensure all functions have proper closing braces
-    fixedCode = this.ensureProperFunctionClosures(fixedCode);
-
-    return fixedCode;
+  // Remove old methods that are no longer needed
+  private async writeApiRoute(schemaDef: SchemaDefinition, content: string) {
+    // This method is kept for backward compatibility but redirects to new method
+    await this.writeMainApiRoute(schemaDef, content);
   }
 
-  private ensureProperFunctionClosures(code: string): string {
-    // Split by function declarations and ensure each has proper closure
-    const functionRegex =
-      /export async function (GET|POST|PUT|DELETE)\(request: NextRequest\)[^{]*{/g;
-    const functions = code.split(functionRegex);
-
-    if (functions.length < 2) {
-      // If functions aren't properly split, use fallback
-      return code;
-    }
-
-    let reconstructed = functions[0]; // Imports and setup
-    let match;
-    let index = 1;
-
-    // Reset regex
-    functionRegex.lastIndex = 0;
-
-    while (
-      (match = functionRegex.exec(code)) !== null &&
-      index < functions.length
-    ) {
-      const methodName = match[1];
-      let functionBody = functions[index];
-
-      // Ensure proper brace balancing
-      const openBraces = (functionBody.match(/{/g) || []).length;
-      const closeBraces = (functionBody.match(/}/g) || []).length;
-      const missingBraces = openBraces - closeBraces + 1; // +1 for the opening brace of the function
-
-      reconstructed += `export async function ${methodName}(request: NextRequest) {`;
-      reconstructed += functionBody;
-
-      // Add missing closing braces
-      for (let i = 0; i < missingBraces; i++) {
-        reconstructed += "\n}";
-      }
-
-      index++;
-    }
-
-    return reconstructed;
-  }
+  // ...existing validation methods can be removed or simplified...
 }
