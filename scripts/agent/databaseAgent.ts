@@ -21,6 +21,64 @@ export class DatabaseAgent extends BaseAgent {
   private uiIntegrator = new UIIntegrator();
 
   async processQuery(query: string) {
+    this.log({
+      type: "thinking",
+      message: "Starting agentic database workflow...",
+    });
+
+    if (!this.model) {
+      // Fallback to legacy workflow if no API key
+      console.log(
+        chalk.yellow("🤖 Using legacy workflow (no API key detected)")
+      );
+      return this.processQueryLegacy(query);
+    }
+
+    try {
+      // Use the agentic workflow with tool calling and feedback loops
+      console.log(chalk.blue("🧠 Initializing agentic AI agent..."));
+      console.log(
+        chalk.gray(
+          "   This agent will use tools to understand your project and implement features"
+        )
+      );
+      console.log();
+
+      const enhancedQuery = `${query}
+
+Project Context: This is a Next.js project with TypeScript and Drizzle ORM. The project structure includes:
+- Frontend: Spotify clone with components in src/components/
+- Database: Drizzle ORM with schema in src/db/schema/
+- API Routes: Next.js API routes in src/app/api/
+
+Please analyze the project structure first, then implement the requested database features including:
+1. Database schemas with migrations
+2. API routes for CRUD operations
+3. Frontend integration with React hooks
+4. UI updates to display the data
+
+Be thorough and methodical in your approach.`;
+
+      const result = await this.executeAgenticWorkflow(enhancedQuery, true);
+
+      console.log(chalk.green("\n✅ Agentic workflow completed!"));
+      console.log(
+        chalk.cyan(
+          "🤖 AI agent has finished implementing your database features"
+        )
+      );
+      console.log(
+        chalk.gray(`📝 Final result: ${result.substring(0, 150)}...`)
+      );
+    } catch (error: any) {
+      console.log(chalk.red(`❌ Agentic workflow failed: ${error.message}`));
+      console.log(chalk.yellow("🔄 Falling back to legacy workflow..."));
+      return this.processQueryLegacy(query);
+    }
+  }
+
+  // Legacy workflow for fallback
+  private async processQueryLegacy(query: string) {
     this.log({ type: "thinking", message: "Processing your request..." });
 
     // Initialize all modules with the Gemini model
