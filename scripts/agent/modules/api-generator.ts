@@ -16,6 +16,42 @@ export class ApiGenerator {
     this.model = model;
   }
 
+  // Add method to read database schema context
+  private async getSchemaContext(): Promise<string> {
+    const schemaDir = path.join(process.cwd(), "src", "db", "schema");
+    const dbIndexPath = path.join(process.cwd(), "src", "db", "index.ts");
+
+    let schemaContext = "";
+
+    // Read main db index file
+    if (fs.existsSync(dbIndexPath)) {
+      const dbIndexContent = fs.readFileSync(dbIndexPath, "utf-8");
+      schemaContext += `\n// Database configuration (src/db/index.ts):\n${dbIndexContent}\n`;
+    }
+
+    // Read schema index file
+    const schemaIndexPath = path.join(schemaDir, "index.ts");
+    if (fs.existsSync(schemaIndexPath)) {
+      const schemaIndexContent = fs.readFileSync(schemaIndexPath, "utf-8");
+      schemaContext += `\n// Schema exports (src/db/schema/index.ts):\n${schemaIndexContent}\n`;
+    }
+
+    // Read all schema files
+    if (fs.existsSync(schemaDir)) {
+      const schemaFiles = fs
+        .readdirSync(schemaDir)
+        .filter((file) => file.endsWith(".ts") && file !== "index.ts");
+
+      for (const file of schemaFiles) {
+        const filePath = path.join(schemaDir, file);
+        const content = fs.readFileSync(filePath, "utf-8");
+        schemaContext += `\n// Schema file (src/db/schema/${file}):\n${content}\n`;
+      }
+    }
+
+    return schemaContext;
+  }
+
   async generateApiRoute(schemaDef: SchemaDefinition) {
     if (!this.model) {
       throw new Error(
@@ -103,70 +139,32 @@ export class ApiGenerator {
       .filter((f) => f.isRequired)
       .map((f) => f.name);
 
-    const apiPrompt = `Generate a Next.js API route for the main CRUD operations (GET all, POST create) following this exact pattern:
+    // Get database schema context
+    const schemaContext = await this.getSchemaContext();
 
-Table: ${tableName}
-Type: ${className}
-Required fields: ${requiredFields.join(", ")}
-Has user_id: ${hasUserId}
+    const apiPrompt = `You are generating a Next.js API route for a PostgreSQL database with Drizzle ORM.
 
-Generate EXACTLY this structure:
-NOTE: for tableName use camelCase ie import { recentlyPlayedSongs } from '@/db/schema'; instead of import { recently_played_songs } from '@/db/schema';
+DATABASE SCHEMA CONTEXT:
+${schemaContext}
 
+TARGET TABLE INFORMATION:
+- Table: ${tableName}
+- Type: ${className}
+- Required fields: ${requiredFields.join(", ")}
+- Has user_id: ${hasUserId}
+- All fields: ${JSON.stringify(fieldsInfo, null, 2)}
 
-\`\`\`typescript
-import { NextRequest, NextResponse } from 'next/server';
-import { db } from '@/db';
-import { ${tableName} } from '@/db/schema';
+Generate a Next.js API route for the main CRUD operations (GET all, POST create) following this exact pattern:
 
-// GET - Fetch all ${tableName}
-export async function GET() {
-  try {
-    const all${className} = await db.select().from(${tableName});
-    return NextResponse.json(all${className});
-  } catch (error) {
-    return NextResponse.json(
-      { error: 'Failed to fetch ${tableName}' },
-      { status: 500 }
-    );
-  }
-}
+CRITICAL REQUIREMENTS:
+1. Use camelCase for table imports (e.g., import { recentlyPlayedSongs } from '@/db/schema')
+2. Use the correct table export name from the schema files above
+3. Ensure field names match the actual schema definition
+4. Include proper error handling and validation
+5. Use NextRequest/NextResponse types
+6. Follow Drizzle ORM patterns shown in the schema context
 
-// POST - Create a new ${tableName.slice(0, -1)}
-export async function POST(request: NextRequest) {
-  try {
-    const body = await request.json();
-    const { ${fieldsInfo.map((f) => f.name).join(", ")} } = body;
-
-    ${
-      requiredFields.length > 0
-        ? `
-    if (!${requiredFields.join(" || !")}) {
-      return NextResponse.json(
-        { error: '${requiredFields.join(", ")} ${
-            requiredFields.length > 1 ? "are" : "is"
-          } required' },
-        { status: 400 }
-      );
-    }`
-        : ""
-    }
-
-    const new${className} = await db.insert(${tableName}).values({
-      ${fieldsInfo.map((f) => f.name).join(",\n      ")},
-    }).returning();
-
-    return NextResponse.json(new${className}[0], { status: 201 });
-  } catch (error) {
-    return NextResponse.json(
-      { error: 'Failed to create ${tableName.slice(0, -1)}' },
-      { status: 500 }
-    );
-  }
-}
-\`\`\`
-
-Return ONLY the TypeScript code, no markdown blocks or explanations.`;
+Generate ONLY the TypeScript code, no markdown blocks or explanations.`;
 
     try {
       const result = await this.model.generateContent(apiPrompt);
@@ -198,119 +196,31 @@ Return ONLY the TypeScript code, no markdown blocks or explanations.`;
         isRequired: f.constraints?.includes("notNull()"),
       }));
 
-    const apiPrompt = `Generate a Next.js dynamic API route for individual operations (GET by ID, PUT update, DELETE) following this exact pattern:
+    // Get database schema context
+    const schemaContext = await this.getSchemaContext();
 
-Table: ${tableName}
-Type: ${className}
+    const apiPrompt = `You are generating a Next.js dynamic API route for individual operations with PostgreSQL and Drizzle ORM.
 
-Generate EXACTLY this structure:
+DATABASE SCHEMA CONTEXT:
+${schemaContext}
 
-\`\`\`typescript
-import { NextRequest, NextResponse } from 'next/server';
-import { db } from '@/db';
-import { ${tableName} } from '@/db/schema';
-import { eq } from 'drizzle-orm';
+TARGET TABLE INFORMATION:
+- Table: ${tableName}
+- Type: ${className}
+- All fields: ${JSON.stringify(fieldsInfo, null, 2)}
 
-// GET - Fetch a single ${tableName.slice(0, -1)} by ID
-export async function GET(
-  request: NextRequest,
-  { params }: { params: { id: string } }
-) {
-  try {
-    const ${tableName.slice(0, -1)}Id = parseInt(params.id);
+Generate a Next.js dynamic API route for individual operations (GET by ID, PUT update, DELETE) with these requirements:
 
-    const ${tableName.slice(0, -1)} = await db.select()
-      .from(${tableName})
-      .where(eq(${tableName}.id, ${tableName.slice(0, -1)}Id))
-      .limit(1);
+CRITICAL REQUIREMENTS:
+1. Use camelCase for table imports matching the schema files above
+2. Use the correct table export name from the schema context
+3. Import from '@/db' and '@/db/schema' as shown in the schema context
+4. Include proper error handling for all operations
+5. Use eq from 'drizzle-orm' for WHERE clauses
+6. Follow the exact field names from the schema definition
+7. Include updated_at field handling if it exists in the schema
 
-    if (${tableName.slice(0, -1)}.length === 0) {
-      return NextResponse.json(
-        { error: '${className} not found' },
-        { status: 404 }
-      );
-    }
-
-    return NextResponse.json(${tableName.slice(0, -1)}[0]);
-  } catch (error) {
-    return NextResponse.json(
-      { error: 'Failed to fetch ${tableName.slice(0, -1)}' },
-      { status: 500 }
-    );
-  }
-}
-
-// PUT - Update a ${tableName.slice(0, -1)}
-export async function PUT(
-  request: NextRequest,
-  { params }: { params: { id: string } }
-) {
-  try {
-    const ${tableName.slice(0, -1)}Id = parseInt(params.id);
-    const body = await request.json();
-    const { ${fieldsInfo.map((f) => f.name).join(", ")} } = body;
-
-    const updated${className} = await db.update(${tableName})
-      .set({
-        ${fieldsInfo.map((f) => f.name).join(",\n        ")},
-        ${
-          schemaDef.fields.some((f) => f.name === "updated_at")
-            ? "updatedAt: new Date(),"
-            : ""
-        }
-      })
-      .where(eq(${tableName}.id, ${tableName.slice(0, -1)}Id))
-      .returning();
-
-    if (updated${className}.length === 0) {
-      return NextResponse.json(
-        { error: '${className} not found' },
-        { status: 404 }
-      );
-    }
-
-    return NextResponse.json(updated${className}[0]);
-  } catch (error) {
-    return NextResponse.json(
-      { error: 'Failed to update ${tableName.slice(0, -1)}' },
-      { status: 500 }
-    );
-  }
-}
-
-// DELETE - Delete a ${tableName.slice(0, -1)}
-export async function DELETE(
-  request: NextRequest,
-  { params }: { params: { id: string } }
-) {
-  try {
-    const ${tableName.slice(0, -1)}Id = parseInt(params.id);
-
-    const deleted${className} = await db.delete(${tableName})
-      .where(eq(${tableName}.id, ${tableName.slice(0, -1)}Id))
-      .returning();
-
-    if (deleted${className}.length === 0) {
-      return NextResponse.json(
-        { error: '${className} not found' },
-        { status: 404 }
-      );
-    }
-
-    return NextResponse.json(
-      { message: '${className} deleted successfully' },
-      { status: 200 }
-    );
-  } catch (error) {
-    return NextResponse.json(
-      { error: 'Failed to delete ${tableName.slice(0, -1)}' },
-      { status: 500 }
-    );
-  }
-}
-\`\`\`
-
-Return ONLY the TypeScript code, no markdown blocks or explanations.`;
+Generate ONLY the TypeScript code for GET, PUT, and DELETE operations, no markdown blocks or explanations.`;
 
     try {
       const result = await this.model.generateContent(apiPrompt);
