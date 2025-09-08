@@ -181,6 +181,8 @@ Generate a complete, executable TypeScript seed file with:
 - Connection cleanup
 - Detailed logging
 
+use this https://v3.fal.media/files/elephant/N5qDbXOpqAlIcK7kJ4BBp_output.png for image url whenever image url is required
+
 IMPORTANT: Generate ONLY the TypeScript code, no explanation or markdown formatting. Do not include any comments in the code. Ensure the generated code uses the correct camelCase field names and table export name.`;
 
     try {
